@@ -1,5 +1,5 @@
 import { classifyError, loadPdfJs, PDFJS_ASSET_OPTIONS, type OpenError } from '@/lib/pdf/pdfjs'
-import { clearSaved, loadSaved, saveSource } from '@/lib/persist'
+import { clearSaved, loadSaved, saveSource, saveState } from '@/lib/persist'
 import { uid } from '@/lib/ids'
 import { clearHistory, useDoc } from '@/store/document'
 import { useSession } from '@/store/session'
@@ -112,9 +112,14 @@ export async function resumeSaved(password?: string) {
   })
 }
 
+/** Back to the landing page. The autosave is kept so it can be resumed. */
 export async function closeDocument() {
+  const { pages, elements } = useDoc.getState()
+  const { fileName, status } = useSession.getState()
+  if (status === 'ready') await saveState({ fileName, pages, elements }).catch(() => {})
   useSession.getState().close()
   useDoc.getState().reset([], {})
   clearHistory()
-  await clearSaved().catch(() => {})
 }
+
+export const discardSaved = () => clearSaved().catch(() => {})

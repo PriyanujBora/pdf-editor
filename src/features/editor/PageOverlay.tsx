@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Group, Layer, Rect, Stage, Transformer } from 'react-konva'
 import type Konva from 'konva'
 import { useShallow } from 'zustand/react/shallow'
+import { toast } from 'sonner'
 import { isCoarsePointer } from '@/hooks/use-media-query'
 import { primeKeyboard } from '@/lib/keyboard'
 import { getTextBlocks, type TextBlock } from '@/lib/pdf/text-blocks'
@@ -63,7 +64,16 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
     if (tool !== 'edit-text' || !pdf || blocks) return
     let alive = true
     void pdf.getPage(page.srcIndex + 1).then((p) =>
-      getTextBlocks(p, String(page.srcIndex)).then((b) => alive && setBlocks(b)),
+      getTextBlocks(p, String(page.srcIndex)).then((b) => {
+        if (!alive) return
+        setBlocks(b)
+        if (!b.length && useUi.getState().currentPageId === page.id) {
+          toast('No editable text on this page', {
+            id: 'no-text',
+            description: 'It may be a scanned image. You can still add new text on top.',
+          })
+        }
+      }),
     )
     return () => {
       alive = false
@@ -140,7 +150,7 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
           if (el.kind === 'text') useUi.getState().startEditing(el.id)
         },
         onDragEnd: (e: Konva.KonvaEventObject<DragEvent>) => {
-          useDoc.getState().updateElement(el.id, { x: e.target.x(), y: e.target.y() })
+          useDoc.getState().updateElement(el.id, { x: e.target.x(), y: e.target.y() }, { merge: false })
         },
         onTransformEnd: (e: KEvt) => {
           const n = e.target
@@ -150,13 +160,13 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
           const base = { x: n.x(), y: n.y(), rotation: Math.round(n.rotation() * 100) / 100 }
           if (el.kind === 'text') {
             const size = Math.max(2, Math.round(el.size * sy * 10) / 10)
-            useDoc.getState().updateElement(el.id, { ...base, size })
+            useDoc.getState().updateElement(el.id, { ...base, size }, { merge: false })
           } else {
             useDoc.getState().updateElement(el.id, {
               ...base,
               width: Math.max(4, el.width * sx),
               height: Math.max(4, el.height * sy),
-            })
+            }, { merge: false })
           }
         },
       }

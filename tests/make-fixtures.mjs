@@ -5,14 +5,22 @@ import rawFontkit from '@pdf-lib/fontkit'
 
 // Same adapter as src/lib/export/fontkit-compat.ts.
 const fontkit = {
-  create(data, ps) {
-    const font = rawFontkit.create(data, ps)
-    const mk = font.createSubset.bind(font)
-    font.createSubset = () => {
+  create(d, ps) {
+    const f = rawFontkit.create(d, ps)
+    const mk = f.createSubset.bind(f)
+    f.createSubset = () => {
       const s = mk()
+      // Same fixes as src/lib/export/fontkit-compat.ts (encode() clash + loca padding).
+      const add = s._addGlyph.bind(s)
+      s._addGlyph = (gid) => {
+        const i = add(gid)
+        const b = s.glyf[i]
+        if (b.length % 2) { const p = b.constructor.alloc(b.length + 1); p.set(b); s.glyf[i] = p; s.offset += 1 }
+        return i
+      }
       return { includeGlyph: (g) => s.includeGlyph(g), encodeStream: () => s.encodeStream(), get cff() { return s.cff } }
     }
-    return font
+    return f
   },
 }
 import { chromium } from 'playwright'

@@ -60,20 +60,17 @@ export function sampleColors(canvas: HTMLCanvasElement, rect: { x: number; y: nu
   }
   if (!dists.length) return { background: hex(bg.r, bg.g, bg.b), ink: bg.r + bg.g + bg.b > 384 ? '#000000' : '#ffffff' }
   dists.sort((p, q) => q.d - p.d)
-  const top = dists.slice(0, Math.max(1, Math.ceil(dists.length * 0.3)))
-  let r = 0
-  let g = 0
-  let b = 0
-  for (const { i } of top) {
-    r += data[i]
-    g += data[i + 1]
-    b += data[i + 2]
+  const top = dists.slice(0, Math.max(1, Math.ceil(dists.length * 0.25)))
+  // Per-channel median: robust to the coloured fringes of subpixel (LCD)
+  // anti-aliasing that Chrome applies on pdf.js' opaque canvases.
+  const median = (off: number) => {
+    const v = top.map(({ i }) => data[i + off]).sort((p, q) => p - q)
+    return v[v.length >> 1]
   }
-  const n = top.length
-  ;[r, g, b] = [r / n, g / n, b / n]
+  let [r, g, b] = [median(0), median(1), median(2)]
   // Anti-aliasing lifts pure black/white slightly; snap near-neutral extremes.
   const neutral = Math.max(r, g, b) - Math.min(r, g, b) < 12
-  if (neutral && r + g + b < 3 * 48) [r, g, b] = [0, 0, 0]
+  if (neutral && r + g + b < 3 * 12) [r, g, b] = [0, 0, 0]
   if (neutral && r + g + b > 3 * 240) [r, g, b] = [255, 255, 255]
   let [br, bgc, bb] = [bg.r, bg.g, bg.b]
   if (Math.max(br, bgc, bb) - Math.min(br, bgc, bb) < 6 && br + bgc + bb > 3 * 248) [br, bgc, bb] = [255, 255, 255]

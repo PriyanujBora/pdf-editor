@@ -13,7 +13,8 @@ export interface DocState {
 
   reset: (pages: PageItem[], elements?: Record<string, EditorElement>) => void
   addElement: (el: EditorElement) => void
-  updateElement: (id: string, patch: Partial<EditorElement>) => void
+  /** `merge: false` forces a separate undo step (drag/transform ends). */
+  updateElement: (id: string, patch: Partial<EditorElement>, opts?: { merge?: boolean }) => void
   removeElement: (id: string) => void
   movePage: (from: number, to: number) => void
   rotatePage: (pageId: string, delta: 90 | -90) => void
@@ -23,20 +24,25 @@ export interface DocState {
 type Tracked = Pick<DocState, 'pages' | 'elements'>
 
 /**
- * Coalesce bursts of changes (typing, colour-picker drags, nudges) into a
- * single undo step: record the state *before* the burst, ignore the rest until
- * things go quiet.
+ * Undo granularity. Discrete actions (add, delete, drag, page ops) each get
+ * their own undo step. Repeated updates of the *same fields of the same
+ * element* in quick succession (typing, colour-picker drags, arrow nudges)
+ * merge into one step.
  */
-function coalesce<T extends (...args: never[]) => void>(fn: T, quietMs = 350): T {
-  let armed = true
-  let timer: ReturnType<typeof setTimeout> | undefined
+let mergeKey: string | null = null
+const MERGE_WINDOW_MS = 1000
+
+function mergeBursts<T extends (...args: never[]) => void>(record: T): T {
+  let lastKey: string | null = null
+  let lastAt = 0
   return ((...args: Parameters<T>) => {
-    if (armed) {
-      fn(...args)
-      armed = false
-    }
-    clearTimeout(timer)
-    timer = setTimeout(() => (armed = true), quietMs)
+    const key = mergeKey
+    mergeKey = null
+    const now = Date.now()
+    const merge = key !== null && key === lastKey && now - lastAt < MERGE_WINDOW_MS
+    lastKey = key
+    lastAt = now
+    if (!merge) record(...args)
   }) as T
 }
 
@@ -50,12 +56,14 @@ export const useDoc = create<DocState>()(
 
       addElement: (el) => set((s) => ({ elements: { ...s.elements, [el.id]: el } })),
 
-      updateElement: (id, patch) =>
+      updateElement: (id, patch, opts) => {
+        mergeKey = opts?.merge === false ? null : id + ':' + Object.keys(patch).sort().join(',')
         set((s) => {
           const cur = s.elements[id]
           if (!cur) return s
           return { elements: { ...s.elements, [id]: { ...cur, ...patch } as EditorElement } }
-        }),
+        })
+      },
 
       removeElement: (id) =>
         set((s) => {
@@ -93,7 +101,7 @@ export const useDoc = create<DocState>()(
       limit: 200,
       partialize: (s): Tracked => ({ pages: s.pages, elements: s.elements }),
       equality: (a, b) => a.pages === b.pages && a.elements === b.elements,
-      handleSet: (handleSet) => coalesce(handleSet),
+      handleSet: (handleSet) => mergeBursts(handleSet),
     },
   ),
 )
