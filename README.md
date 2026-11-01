@@ -1,32 +1,46 @@
-# React + TypeScript + Vite
+# Free PDF Editor
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+Edit PDFs in the browser — change existing text, add text and images, reorder/rotate/delete pages,
+download. Everything runs on your device; no file is ever uploaded. Installable and works offline.
 
-Currently, two official plugins are available:
+## Run locally
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+Requires Node 20+.
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```bash
+npm install
+npm run dev          # http://localhost:5173 (or pass --port)
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+Production build, served exactly as Cloudflare will serve it (headers, CSP, service worker):
+
+```bash
+npm run cf:dev       # builds, then `wrangler dev` on http://localhost:8787 — no Cloudflare login needed
+```
+
+## Test
+
+```bash
+npx playwright install chromium   # once
+npm run fixtures                  # generate test PDFs into tests/fixtures
+npm run dev -- --port 5199        # in another terminal
+npm run test:e2e                  # phone 390px, tablet 820px, desktop 1440px; screenshots in tests/out
+npm run test:prod                 # against `npm run cf:dev`
+```
+
+## Deploy (later)
+
+The app is a static-assets-only Cloudflare Worker configured in `wrangler.jsonc`:
+
+```bash
+npm run build
+npx wrangler deploy
+```
+
+## Notes
+
+- Fonts bundled for editing/export: Inter, Roboto, Noto Serif, Noto Sans Bengali, Noto Sans Devanagari
+  (SIL Open Font License). Original fonts in PDFs are usually subsets, so edited text uses the closest
+  bundled family at the original size and colour.
+- Edited existing text is covered with a patch of the sampled background colour; the original text is
+  hidden, not erased from the file.
