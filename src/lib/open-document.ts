@@ -97,7 +97,10 @@ export async function openDocument(bytes: Uint8Array, fileName: string, opts: Op
 
 export async function openFile(file: File, password?: string) {
   if (file.size > MAX_FILE_BYTES) {
-    throw new OpenFailure({ kind: 'invalid', message: 'That file is larger than 512 MB, which is too big to edit in the browser.' })
+    throw new OpenFailure({
+      kind: 'invalid',
+      message: 'That file is larger than 512 MB, which is too big to edit in the browser.',
+    })
   }
   const bytes = new Uint8Array(await file.arrayBuffer())
   return openDocument(bytes, file.name, { password })

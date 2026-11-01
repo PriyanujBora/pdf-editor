@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { AlertCircle, FileUp, History, ShieldCheck } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ThemeToggle } from '@/components/theme-toggle'
@@ -6,7 +6,9 @@ import { OpenFailure, openFile, resumeSaved } from '@/lib/open-document'
 import { peekSavedName } from '@/lib/persist'
 import { useSession } from '@/store/session'
 import { cn } from '@/lib/utils'
-import { PasswordDialog } from './PasswordDialog'
+
+// The dialog (and Radix' focus/scroll machinery) is only needed for protected files.
+const PasswordDialog = lazy(() => import('./PasswordDialog').then((m) => ({ default: m.PasswordDialog })))
 
 type Pending = { kind: 'file'; file: File } | { kind: 'resume'; name: string }
 
@@ -93,12 +95,15 @@ export function Landing() {
   }, [accept])
 
   const loading = status === 'loading' || busyName !== null
+  const canDrop = !matchMedia('(pointer: coarse)').matches
 
   return (
     <main className="flex min-h-full flex-col bg-workspace">
       <header className="flex items-center justify-between px-4 pt-[max(env(safe-area-inset-top),0.75rem)] md:px-6">
         <span className="flex items-center gap-2 text-sm font-semibold tracking-tight">
-          <span className="grid size-6 place-items-center rounded-md bg-foreground text-[10px] font-bold text-background">PDF</span>
+          <span className="grid size-6 place-items-center rounded-md bg-foreground text-[10px] font-bold text-background">
+            PDF
+          </span>
           Free PDF Editor
         </span>
         <ThemeToggle />
@@ -139,7 +144,7 @@ export function Landing() {
                 </div>
                 <div className="space-y-2">
                   <h1 className="text-2xl font-semibold tracking-tight text-balance md:text-3xl">
-                    {dragging ? 'Release to open' : 'Drop a PDF to start editing'}
+                    {dragging ? 'Release to open' : canDrop ? 'Drop a PDF to start editing' : 'Open a PDF to start editing'}
                   </h1>
                   <p className="text-muted-foreground">Edit text, add images, reorder pages.</p>
                 </div>
@@ -147,7 +152,10 @@ export function Landing() {
                   Choose PDF
                 </Button>
                 {error && (
-                  <p role="alert" className="flex max-w-md items-start gap-2 rounded-xl bg-destructive/10 px-4 py-3 text-left text-sm text-destructive">
+                  <p
+                    role="alert"
+                    className="flex max-w-md items-start gap-2 rounded-xl bg-destructive/10 px-4 py-3 text-left text-sm text-destructive"
+                  >
                     <AlertCircle className="mt-0.5 size-4 shrink-0" />
                     {error}
                   </p>
@@ -188,13 +196,17 @@ export function Landing() {
         }}
       />
 
-      <PasswordDialog
-        open={pwd !== null}
-        wrong={pwd?.wrong ?? false}
-        fileName={pwd ? (pwd.pending.kind === 'file' ? pwd.pending.file.name : pwd.pending.name) : ''}
-        onSubmit={(p) => pwd && void run(pwd.pending, p)}
-        onCancel={() => setPwd(null)}
-      />
+      {pwd && (
+        <Suspense>
+          <PasswordDialog
+            open={pwd !== null}
+            wrong={pwd?.wrong ?? false}
+            fileName={pwd ? (pwd.pending.kind === 'file' ? pwd.pending.file.name : pwd.pending.name) : ''}
+            onSubmit={(p) => pwd && void run(pwd.pending, p)}
+            onCancel={() => setPwd(null)}
+          />
+        </Suspense>
+      )}
     </main>
   )
 }

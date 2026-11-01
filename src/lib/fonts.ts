@@ -19,8 +19,24 @@ export interface FontFamilyDef {
 export const FONT_FAMILIES: Record<FontFamilyId, FontFamilyDef> = {
   inter: { id: 'inter', label: 'Inter', css: 'PDF Inter', file: 'Inter', hasItalic: true, ascent: 0.9688, descent: 0.2412 },
   roboto: { id: 'roboto', label: 'Roboto', css: 'PDF Roboto', file: 'Roboto', hasItalic: true, ascent: 0.9277, descent: 0.2441 },
-  'noto-serif': { id: 'noto-serif', label: 'Noto Serif', css: 'PDF Noto Serif', file: 'NotoSerif', hasItalic: true, ascent: 1.069, descent: 0.293 },
-  'noto-bengali': { id: 'noto-bengali', label: 'Noto Sans Bengali', css: 'PDF Noto Sans Bengali', file: 'NotoSansBengali', hasItalic: false, ascent: 0.917, descent: 0.408 },
+  'noto-serif': {
+    id: 'noto-serif',
+    label: 'Noto Serif',
+    css: 'PDF Noto Serif',
+    file: 'NotoSerif',
+    hasItalic: true,
+    ascent: 1.069,
+    descent: 0.293,
+  },
+  'noto-bengali': {
+    id: 'noto-bengali',
+    label: 'Noto Sans Bengali',
+    css: 'PDF Noto Sans Bengali',
+    file: 'NotoSansBengali',
+    hasItalic: false,
+    ascent: 0.917,
+    descent: 0.408,
+  },
   'noto-devanagari': {
     id: 'noto-devanagari',
     label: 'Noto Sans Devanagari',
@@ -50,7 +66,8 @@ export function scriptOf(cp: number): Script | null {
   if (cp >= 0x0980 && cp <= 0x09ff) return 'bengali'
   if ((cp >= 0x0900 && cp <= 0x097f) || (cp >= 0xa8e0 && cp <= 0xa8ff) || (cp >= 0x1cd0 && cp <= 0x1cff)) return 'devanagari'
   // Spaces, digits, punctuation, joiners and dandas are script-neutral.
-  if (cp <= 0x40 || (cp >= 0x5b && cp <= 0x60) || (cp >= 0x7b && cp <= 0x7f) || cp === 0x200c || cp === 0x200d || cp === 0x25cc) return null
+  if (cp <= 0x40 || (cp >= 0x5b && cp <= 0x60) || (cp >= 0x7b && cp <= 0x7f) || cp === 0x200c || cp === 0x200d || cp === 0x25cc)
+    return null
   return 'latin'
 }
 

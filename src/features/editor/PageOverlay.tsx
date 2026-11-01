@@ -51,7 +51,7 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
   const selectedId = useUi((s) => s.selectedId)
   const editingId = useUi((s) => s.editingId)
   const pdf = useSession((s) => s.pdf)
-  const coarse = useMemo(isCoarsePointer, [])
+  const coarse = useMemo(() => isCoarsePointer(), [])
   const [blocks, setBlocks] = useState<TextBlock[] | null>(null)
 
   const rotated = page.rotation % 180 !== 0
@@ -78,17 +78,14 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
     return () => {
       alive = false
     }
-  }, [tool, pdf, page.srcIndex, blocks])
+  }, [tool, pdf, page.srcIndex, page.id, blocks])
 
   const covers = elements.flatMap((e) => (e.kind === 'text' && e.cover ? [{ id: e.id, ...e.cover }] : []))
   const visibleBlocks = useMemo(() => {
     if (tool !== 'edit-text' || !blocks) return []
     // Hide lines that already have a replacement.
     return blocks.filter(
-      (b) =>
-        !covers.some(
-          (c) => b.x < c.x + c.width && b.x + b.width > c.x && b.y < c.y + c.height && b.y + b.height > c.y,
-        ),
+      (b) => !covers.some((c) => b.x < c.x + c.width && b.x + b.width > c.x && b.y < c.y + c.height && b.y + b.height > c.y),
     )
   }, [tool, blocks, covers])
 
@@ -116,63 +113,64 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
     }
   }
 
-  const handlersFor = useCallback(
-    (el: EditorElement) => {
-      const select = () => {
-        const ui = useUi.getState()
-        if (ui.editingId && ui.editingId !== el.id) ui.set({ editingId: null })
-        if (ui.selectedId !== el.id) ui.select(el.id)
-      }
-      const tapEdit = (e: KEvt) => {
-        e.cancelBubble = true
-        const ui = useUi.getState()
-        const wasSelected = pressedSelected ?? ui.selectedId === el.id
-        pressedSelected = null
-        // Tapping an already-selected text (or any text with the text tools) edits it.
-        if (el.kind === 'text' && (wasSelected || ui.tool !== 'select')) {
-          primeKeyboard()
-          ui.startEditing(el.id)
-        } else select()
-      }
-      return {
-        onPointerDown: (e: Konva.KonvaEventObject<PointerEvent>) => {
-          // Mouse/pen select on press so a drag can start immediately; touch waits for a tap.
-          if (e.evt.pointerType !== 'touch' && useUi.getState().tool === 'select') {
-            e.cancelBubble = true
-            pressedSelected = useUi.getState().selectedId === el.id
-            select()
-          }
-        },
-        onClick: tapEdit,
-        onTap: tapEdit,
-        onDblClick: (e: KEvt) => {
+  const handlersFor = useCallback((el: EditorElement) => {
+    const select = () => {
+      const ui = useUi.getState()
+      if (ui.editingId && ui.editingId !== el.id) ui.set({ editingId: null })
+      if (ui.selectedId !== el.id) ui.select(el.id)
+    }
+    const tapEdit = (e: KEvt) => {
+      e.cancelBubble = true
+      const ui = useUi.getState()
+      const wasSelected = pressedSelected ?? ui.selectedId === el.id
+      pressedSelected = null
+      // Tapping an already-selected text (or any text with the text tools) edits it.
+      if (el.kind === 'text' && (wasSelected || ui.tool !== 'select')) {
+        primeKeyboard()
+        ui.startEditing(el.id)
+      } else select()
+    }
+    return {
+      onPointerDown: (e: Konva.KonvaEventObject<PointerEvent>) => {
+        // Mouse/pen select on press so a drag can start immediately; touch waits for a tap.
+        if (e.evt.pointerType !== 'touch' && useUi.getState().tool === 'select') {
           e.cancelBubble = true
-          if (el.kind === 'text') useUi.getState().startEditing(el.id)
-        },
-        onDragEnd: (e: Konva.KonvaEventObject<DragEvent>) => {
-          useDoc.getState().updateElement(el.id, { x: e.target.x(), y: e.target.y() }, { merge: false })
-        },
-        onTransformEnd: (e: KEvt) => {
-          const n = e.target
-          const sx = n.scaleX()
-          const sy = n.scaleY()
-          n.scale({ x: 1, y: 1 })
-          const base = { x: n.x(), y: n.y(), rotation: Math.round(n.rotation() * 100) / 100 }
-          if (el.kind === 'text') {
-            const size = Math.max(2, Math.round(el.size * sy * 10) / 10)
-            useDoc.getState().updateElement(el.id, { ...base, size }, { merge: false })
-          } else {
-            useDoc.getState().updateElement(el.id, {
+          pressedSelected = useUi.getState().selectedId === el.id
+          select()
+        }
+      },
+      onClick: tapEdit,
+      onTap: tapEdit,
+      onDblClick: (e: KEvt) => {
+        e.cancelBubble = true
+        if (el.kind === 'text') useUi.getState().startEditing(el.id)
+      },
+      onDragEnd: (e: Konva.KonvaEventObject<DragEvent>) => {
+        useDoc.getState().updateElement(el.id, { x: e.target.x(), y: e.target.y() }, { merge: false })
+      },
+      onTransformEnd: (e: KEvt) => {
+        const n = e.target
+        const sx = n.scaleX()
+        const sy = n.scaleY()
+        n.scale({ x: 1, y: 1 })
+        const base = { x: n.x(), y: n.y(), rotation: Math.round(n.rotation() * 100) / 100 }
+        if (el.kind === 'text') {
+          const size = Math.max(2, Math.round(el.size * sy * 10) / 10)
+          useDoc.getState().updateElement(el.id, { ...base, size }, { merge: false })
+        } else {
+          useDoc.getState().updateElement(
+            el.id,
+            {
               ...base,
               width: Math.max(4, el.width * sx),
               height: Math.max(4, el.height * sy),
-            }, { merge: false })
-          }
-        },
-      }
-    },
-    [],
-  )
+            },
+            { merge: false },
+          )
+        }
+      },
+    }
+  }, [])
 
   const anchor = coarse ? 18 : 10
 
@@ -256,7 +254,16 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
           enabledAnchors={
             selectedEl?.kind === 'text'
               ? ['top-left', 'top-right', 'bottom-left', 'bottom-right']
-              : ['top-left', 'top-center', 'top-right', 'middle-left', 'middle-right', 'bottom-left', 'bottom-center', 'bottom-right']
+              : [
+                  'top-left',
+                  'top-center',
+                  'top-right',
+                  'middle-left',
+                  'middle-right',
+                  'bottom-left',
+                  'bottom-center',
+                  'bottom-right',
+                ]
           }
           rotationSnaps={[0, 90, 180, 270]}
           rotationSnapTolerance={5}

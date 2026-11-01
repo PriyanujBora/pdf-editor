@@ -1,17 +1,17 @@
 import { ArrowLeft, Download, Minus, Plus, Redo2, Undo2 } from 'lucide-react'
-import { useStore } from 'zustand'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { ThemeToggle } from '@/components/theme-toggle'
 import { closeDocument } from '@/lib/open-document'
 import { cn } from '@/lib/utils'
-import { redo, undo, useDoc } from '@/store/document'
+import { redo, undo } from '@/store/document'
 import { useSession } from '@/store/session'
 import { useUi } from '@/store/ui'
 import { downloadPdf, pickImage } from './actions'
 import { TOOLS } from './tools'
-import { fitWidth } from './Viewer'
+import { viewerBridge } from './viewer-bridge'
+import { useHistoryState } from '@/hooks/use-history-state'
 
 function IconTip({ label, shortcut, children }: { label: string; shortcut?: string; children: React.ReactElement }) {
   return (
@@ -25,17 +25,17 @@ function IconTip({ label, shortcut, children }: { label: string; shortcut?: stri
   )
 }
 
-export function useHistoryState() {
-  const canUndo = useStore(useDoc.temporal, (s) => s.pastStates.length > 0)
-  const canRedo = useStore(useDoc.temporal, (s) => s.futureStates.length > 0)
-  return { canUndo, canRedo }
-}
-
 export function FileTitle() {
   const fileName = useSession((s) => s.fileName)
   return (
     <div className="flex min-w-0 items-center gap-1">
-      <Button variant="ghost" size="icon" className="size-11 shrink-0 lg:size-9" aria-label="Close file" onClick={() => void closeDocument()}>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="size-11 shrink-0 lg:size-9"
+        aria-label="Close file"
+        onClick={() => void closeDocument()}
+      >
         <ArrowLeft />
       </Button>
       <span className="truncate text-sm font-medium" title={fileName}>
@@ -93,17 +93,34 @@ export function Toolbar() {
         </IconTip>
         <Separator orientation="vertical" className="mx-1 !h-5" />
         <IconTip label="Zoom out" shortcut={`${mod}−`}>
-          <Button variant="ghost" size="icon" className="size-9" onClick={() => useUi.getState().setZoom(zoom / 1.2)} aria-label="Zoom out">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-9"
+            onClick={() => useUi.getState().setZoom(zoom / 1.2)}
+            aria-label="Zoom out"
+          >
             <Minus />
           </Button>
         </IconTip>
         <IconTip label="Fit width">
-          <Button variant="ghost" className="h-9 w-14 px-0 tabular-nums" onClick={() => fitWidth()} aria-label="Fit width">
+          <Button
+            variant="ghost"
+            className="h-9 w-14 px-0 tabular-nums"
+            onClick={() => viewerBridge.fitWidth()}
+            aria-label="Fit width"
+          >
             {Math.round(zoom * 100)}%
           </Button>
         </IconTip>
         <IconTip label="Zoom in" shortcut={`${mod}+`}>
-          <Button variant="ghost" size="icon" className="size-9" onClick={() => useUi.getState().setZoom(zoom * 1.2)} aria-label="Zoom in">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-9"
+            onClick={() => useUi.getState().setZoom(zoom * 1.2)}
+            aria-label="Zoom in"
+          >
             <Plus />
           </Button>
         </IconTip>
@@ -132,10 +149,15 @@ export function MobileTopBar() {
         <Redo2 />
       </Button>
       <ThemeToggle />
-      <Button size="icon" className="mr-1 size-11 rounded-xl" onClick={() => void downloadPdf()} aria-label="Download PDF" data-testid="download">
+      <Button
+        size="icon"
+        className="mr-1 size-11 rounded-xl"
+        onClick={() => void downloadPdf()}
+        aria-label="Download PDF"
+        data-testid="download"
+      >
         <Download />
       </Button>
     </header>
   )
 }
-

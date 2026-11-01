@@ -19,7 +19,7 @@ import { undo, useDoc } from '@/store/document'
 import { useSession } from '@/store/session'
 import { useUi } from '@/store/ui'
 import type { PageItem } from '@/types'
-import { scrollToPage } from './Viewer'
+import { viewerBridge } from './viewer-bridge'
 
 const THUMB_W = 132
 const thumbCache = new Map<string, string>()
@@ -31,15 +31,14 @@ const ThumbImage = memo(function ThumbImage({ page }: { page: PageItem }) {
   const info = useSession((s) => s.sourcePages[page.srcIndex])
   const visible = useInView(ref, '[data-thumbs-scroll]', '200px 0px')
   const key = `${page.srcIndex}:${page.rotation}`
-  const [url, setUrl] = useState(() => thumbCache.get(key) ?? null)
+  const [rendered, setRendered] = useState<{ key: string; url: string } | null>(null)
+  const url = thumbCache.get(key) ?? (rendered?.key === key ? rendered.url : null)
   const rot = (info.rotate + page.rotation) % 360
   const w = rot % 180 === info.rotate % 180 ? info.width : info.height
   const h = rot % 180 === info.rotate % 180 ? info.height : info.width
 
   useEffect(() => {
-    const cached = thumbCache.get(key)
-    if (cached) return setUrl(cached)
-    if (!visible || !pdf) return
+    if (thumbCache.has(key) || !visible || !pdf) return
     let alive = true
     void (async () => {
       const p = await pdf.getPage(page.srcIndex + 1)
@@ -53,7 +52,7 @@ const ThumbImage = memo(function ThumbImage({ page }: { page: PageItem }) {
       if (!blob) return
       const u = URL.createObjectURL(blob)
       thumbCache.set(key, u)
-      if (alive) setUrl(u)
+      if (alive) setRendered({ key, url: u })
     })().catch(() => {})
     return () => {
       alive = false
@@ -61,19 +60,36 @@ const ThumbImage = memo(function ThumbImage({ page }: { page: PageItem }) {
   }, [visible, pdf, key, page.srcIndex, rot, w])
 
   return (
-    <div ref={ref} className="overflow-hidden rounded-md bg-white shadow-[var(--page-shadow)]" style={{ width: THUMB_W, aspectRatio: `${w} / ${h}` }}>
+    <div
+      ref={ref}
+      className="overflow-hidden rounded-md bg-white shadow-[var(--page-shadow)]"
+      style={{ width: THUMB_W, aspectRatio: `${w} / ${h}` }}
+    >
       {url && <img src={url} alt="" draggable={false} className="size-full object-contain" />}
     </div>
   )
 })
 
-function SortableThumb({ page, index, active, canDelete }: { page: PageItem; index: number; active: boolean; canDelete: boolean }) {
+function SortableThumb({
+  page,
+  index,
+  active,
+  canDelete,
+}: {
+  page: PageItem
+  index: number
+  active: boolean
+  canDelete: boolean
+}) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: page.id })
   return (
     <li
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition }}
-      className={cn('group relative flex flex-col items-center gap-1.5 rounded-xl p-2 select-none', isDragging && 'z-10 opacity-80')}
+      className={cn(
+        'group relative flex flex-col items-center gap-1.5 rounded-xl p-2 select-none',
+        isDragging && 'z-10 opacity-80',
+      )}
       data-thumb-index={index}
     >
       <button
@@ -81,7 +97,7 @@ function SortableThumb({ page, index, active, canDelete }: { page: PageItem; ind
         {...attributes}
         {...listeners}
         onClick={() => {
-          scrollToPage(page.id)
+          viewerBridge.scrollToPage(page.id)
           useUi.getState().set({ currentPageId: page.id, thumbsOpen: false })
         }}
         aria-label={`Page ${index + 1}. Drag to reorder.`}

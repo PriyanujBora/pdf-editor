@@ -1,0 +1,14 @@
+{
+  // Static-assets-only Cloudflare Worker (not Pages). No server code: every
+  // PDF is processed in the browser. Deploy later with `npx wrangler deploy`.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "free-pdf-editor",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "./dist",
+    // Unknown paths serve index.html (the app has no routes, but this keeps
+    // deep links and PWA start_url working).
+    "not_found_handling": "single-page-application"
+  },
+  "observability": { "enabled": false }
+}

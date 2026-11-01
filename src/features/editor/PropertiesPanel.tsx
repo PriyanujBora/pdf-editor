@@ -58,7 +58,12 @@ function TextProps({ el }: { el: TextElement }) {
       </Field>
 
       <Field label="Font">
-        <Select value={el.font} onValueChange={(v) => update(el.id, { font: v as FontFamilyId, italic: el.italic && FONT_FAMILIES[v as FontFamilyId].hasItalic })}>
+        <Select
+          value={el.font}
+          onValueChange={(v) =>
+            update(el.id, { font: v as FontFamilyId, italic: el.italic && FONT_FAMILIES[v as FontFamilyId].hasItalic })
+          }
+        >
           <SelectTrigger className="h-11 w-full lg:h-9" aria-label="Font">
             <SelectValue />
           </SelectTrigger>
@@ -75,7 +80,11 @@ function TextProps({ el }: { el: TextElement }) {
       <div className="grid grid-cols-2 gap-3">
         <Field label="Size">
           <div className="flex h-11 items-center rounded-lg border lg:h-9">
-            <button className="grid h-full w-10 place-items-center text-muted-foreground hover:text-foreground" onClick={() => setSize(el.size - 1)} aria-label="Smaller">
+            <button
+              className="grid h-full w-10 place-items-center text-muted-foreground hover:text-foreground"
+              onClick={() => setSize(el.size - 1)}
+              aria-label="Smaller"
+            >
               <Minus className="size-4" />
             </button>
             <input
@@ -89,7 +98,11 @@ function TextProps({ el }: { el: TextElement }) {
               className="w-full min-w-0 bg-transparent text-center text-base tabular-nums outline-none md:text-sm [&::-webkit-inner-spin-button]:appearance-none"
               aria-label="Font size"
             />
-            <button className="grid h-full w-10 place-items-center text-muted-foreground hover:text-foreground" onClick={() => setSize(el.size + 1)} aria-label="Larger">
+            <button
+              className="grid h-full w-10 place-items-center text-muted-foreground hover:text-foreground"
+              onClick={() => setSize(el.size + 1)}
+              aria-label="Larger"
+            >
               <Plus className="size-4" />
             </button>
           </div>
@@ -133,7 +146,10 @@ function TextProps({ el }: { el: TextElement }) {
               style={{ background: c }}
             />
           ))}
-          <label className="relative size-9 cursor-pointer overflow-hidden rounded-full border bg-[conic-gradient(red,yellow,lime,cyan,blue,magenta,red)] lg:size-7" title="Custom colour">
+          <label
+            className="relative size-9 cursor-pointer overflow-hidden rounded-full border bg-[conic-gradient(red,yellow,lime,cyan,blue,magenta,red)] lg:size-7"
+            title="Custom colour"
+          >
             <input
               type="color"
               value={el.color}
@@ -169,6 +185,9 @@ function TextProps({ el }: { el: TextElement }) {
         <div className="rounded-xl border border-dashed p-3 text-sm">
           <p className="text-xs font-medium text-muted-foreground">Replaces original text</p>
           <p className="mt-1 line-clamp-2 break-words">{el.cover.original}</p>
+          <p className="mt-2 text-xs text-muted-foreground">
+            The original is covered, not erased: it can still be found by copying or searching the downloaded file.
+          </p>
           <Button variant="ghost" className="mt-2 h-10 w-full justify-start gap-2 lg:h-8" onClick={deleteSelected}>
             <Undo /> Restore original
           </Button>
@@ -219,10 +238,22 @@ export function PropertiesPanel({ className }: { className?: string }) {
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold">{el.kind === 'text' ? (el.cover ? 'Edited text' : 'Text') : 'Image'}</h2>
         <div className="flex gap-1">
-          <Button variant="ghost" size="icon" className="size-10 lg:size-8" onClick={() => rotateBy(el, -90)} aria-label="Rotate left">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-10 lg:size-8"
+            onClick={() => rotateBy(el, -90)}
+            aria-label="Rotate left"
+          >
             <RotateCcw />
           </Button>
-          <Button variant="ghost" size="icon" className="size-10 lg:size-8" onClick={() => rotateBy(el, 90)} aria-label="Rotate right">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-10 lg:size-8"
+            onClick={() => rotateBy(el, 90)}
+            aria-label="Rotate right"
+          >
             <RotateCw />
           </Button>
         </div>

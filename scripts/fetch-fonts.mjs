@@ -11,15 +11,15 @@ const FAMILIES = {
 }
 
 const query = Object.entries(FAMILIES)
-  .map(([name, f]) =>
-    'family=' + name.replaceAll(' ', '+') +
-    (f.italic ? ':ital,wght@0,400;0,700;1,400;1,700' : ':wght@400;700'))
+  .map(([name, f]) => 'family=' + name.replaceAll(' ', '+') + (f.italic ? ':ital,wght@0,400;0,700;1,400;1,700' : ':wght@400;700'))
   .join('&')
 
 // An old user agent makes Google Fonts serve complete static .ttf files.
-const css = await (await fetch(`https://fonts.googleapis.com/css2?${query}`, {
-  headers: { 'User-Agent': 'Mozilla/4.0' },
-})).text()
+const css = await (
+  await fetch(`https://fonts.googleapis.com/css2?${query}`, {
+    headers: { 'User-Agent': 'Mozilla/4.0' },
+  })
+).text()
 
 await mkdir('public/fonts', { recursive: true })
 const re = /font-family: '([^']+)';\s*font-style: (\w+);\s*font-weight: (\d+);[^}]*?src: url\(([^)]+)\)/g

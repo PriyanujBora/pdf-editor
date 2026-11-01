@@ -4,6 +4,7 @@ import { useDoc } from '@/store/document'
 import { useSession } from '@/store/session'
 import { clampZoom, useUi } from '@/store/ui'
 import { PageView } from './PageView'
+import { viewerBridge } from './viewer-bridge'
 
 const PAGE_GAP = 16
 
@@ -15,23 +16,17 @@ interface Anchor {
   cy: number
 }
 
-/** Smallest zoom at which the widest page fits the container. */
-export function fitWidthZoom(container: HTMLElement) {
+/** Zoom at which the first page fills the container width (capped at 150%). */
+function fitWidthZoom(container: HTMLElement) {
   const { sourcePages } = useSession.getState()
-  const pages = useDoc.getState().pages
+  const { pages } = useDoc.getState()
+  const { currentPageId } = useUi.getState()
+  const page = pages.find((p) => p.id === currentPageId) ?? pages[0]
+  if (!page) return 1
+  const s = sourcePages[page.srcIndex]
   const avail = container.clientWidth - (container.clientWidth < 640 ? 24 : 64)
-  const widest = Math.max(
-    1,
-    ...pages.map((p) => {
-      const s = sourcePages[p.srcIndex]
-      return p.rotation % 180 ? s.height : s.width
-    }),
-  )
-  return clampZoom(Math.min(1.5, avail / widest))
+  return clampZoom(Math.min(1.5, avail / (page.rotation % 180 ? s.height : s.width)))
 }
-
-export let scrollToPage: (pageId: string) => void = () => {}
-export let fitWidth: () => void = () => {}
 
 export function Viewer() {
   const ref = useRef<HTMLDivElement>(null)
@@ -46,10 +41,10 @@ export function Viewer() {
   }, [])
 
   useEffect(() => {
-    scrollToPage = (pageId) => {
+    viewerBridge.scrollToPage = (pageId) => {
       ref.current?.querySelector(`[data-page-id="${pageId}"]`)?.scrollIntoView({ block: 'start', behavior: 'smooth' })
     }
-    fitWidth = () => ref.current && useUi.getState().setZoom(fitWidthZoom(ref.current))
+    viewerBridge.fitWidth = () => ref.current && useUi.getState().setZoom(fitWidthZoom(ref.current))
   }, [])
 
   /** Remember which point of which page sits under (cx, cy). */

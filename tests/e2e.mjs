@@ -267,64 +267,77 @@ for (const [label, vp] of [
   ['tablet', TABLET],
   ['phone', PHONE],
 ]) {
-  await test(`${label}: touch add text, style drawer, pages sheet, export`, vp, async (page) => {
-    await page.screenshot({ path: `${OUT}/${label}-landing.png` })
-    await open(page, 'text-heavy.pdf')
-    await page.screenshot({ path: `${OUT}/${label}-editor.png` })
-    // no horizontal overflow at fit-width
-    const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)
-    assert.equal(overflow, false, 'no page-level horizontal scroll')
+  await test(
+    `${label}: touch add text, style drawer, pages sheet, export`,
+    vp,
+    async (page) => {
+      await page.screenshot({ path: `${OUT}/${label}-landing.png` })
+      await open(page, 'text-heavy.pdf')
+      await page.screenshot({ path: `${OUT}/${label}-editor.png` })
+      // no horizontal overflow at fit-width
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)
+      assert.equal(overflow, false, 'no page-level horizontal scroll')
 
-    await page.tap('[data-tool=text]')
-    const p = await pagePoint(page, 0, 80, 820)
-    await page.touchscreen.tap(p.x, p.y)
-    await page.waitForSelector('textarea[aria-label="Edit text"]')
-    await page.keyboard.type('Signed on phone')
-    await page.screenshot({ path: `${OUT}/${label}-typing.png` })
-    await page.tap('[data-tool=props]')
-    await page.waitForSelector('[role=dialog] >> text=Font')
-    await page.tap('[role=dialog] [aria-label="Italic"]')
-    await page.screenshot({ path: `${OUT}/${label}-drawer.png` })
-    await page.keyboard.press('Escape')
-    await page.waitForTimeout(400)
-    const el = (await elements(page))[0]
-    assert.equal(el.text, 'Signed on phone')
-    assert.equal(el.italic, true)
+      await page.tap('[data-tool=text]')
+      const p = await pagePoint(page, 0, 80, 690)
+      await page.touchscreen.tap(p.x, p.y)
+      await page.waitForSelector('textarea[aria-label="Edit text"]')
+      await page.keyboard.type('Signed on phone')
+      await page.screenshot({ path: `${OUT}/${label}-typing.png` })
+      await page.tap('[data-tool=props]')
+      await page.waitForSelector('[role=dialog] >> text=Font')
+      await page.tap('[role=dialog] [aria-label="Italic"]')
+      await page.screenshot({ path: `${OUT}/${label}-drawer.png` })
+      await page.keyboard.press('Escape')
+      await page.waitForTimeout(400)
+      const el = (await elements(page))[0]
+      assert.equal(el.text, 'Signed on phone')
+      assert.equal(el.italic, true)
 
-    // Touch targets in the bottom bar are ≥ 44px
-    const sizes = await page.$$eval('nav[aria-label=Tools] button', (bs) => bs.map((b) => [b.offsetWidth, b.offsetHeight]))
-    assert.ok(sizes.every(([w, h]) => w >= 44 && h >= 44), `touch targets ${JSON.stringify(sizes)}`)
+      // Touch targets in the bottom bar are ≥ 44px
+      const sizes = await page.$$eval('nav[aria-label=Tools] button', (bs) => bs.map((b) => [b.offsetWidth, b.offsetHeight]))
+      assert.ok(
+        sizes.every(([w, h]) => w >= 44 && h >= 44),
+        `touch targets ${JSON.stringify(sizes)}`,
+      )
 
-    await page.tap('[data-tool=pages]')
-    await page.waitForSelector('[role=dialog] >> text=Pages')
-    await page.waitForTimeout(500)
-    await page.screenshot({ path: `${OUT}/${label}-pages.png` })
-    await page.tap('[aria-label="Rotate page 1"]')
-    await page.keyboard.press('Escape')
-    await page.waitForTimeout(400)
-    await download(page, `${label}-export.pdf`)
-  }, { touch: true })
+      await page.tap('[data-tool=pages]')
+      await page.waitForSelector('[role=dialog] >> text=Pages')
+      await page.waitForTimeout(500)
+      await page.screenshot({ path: `${OUT}/${label}-pages.png` })
+      await page.tap('[aria-label="Rotate page 1"]')
+      await page.keyboard.press('Escape')
+      await page.waitForTimeout(400)
+      await download(page, `${label}-export.pdf`)
+    },
+    { touch: true },
+  )
 }
 
-await test('phone: pinch zoom', PHONE, async (page) => {
-  await open(page, 'text-heavy.pdf')
-  const z0 = await state(page, () => window.__ui.getState().zoom)
-  const v = await page.locator('[data-testid=viewer]').boundingBox()
-  const cdp = await page.context().newCDPSession(page)
-  const cx = v.x + v.width / 2
-  const cy = v.y + 300
-  const pts = (d) => [
-    { x: cx - d, y: cy, id: 0 },
-    { x: cx + d, y: cy, id: 1 },
-  ]
-  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: pts(40) })
-  for (let d = 50; d <= 120; d += 10) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: pts(d) })
-  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
-  const z1 = await state(page, () => window.__ui.getState().zoom)
-  assert.ok(z1 > z0 * 2, `pinched ${z0} → ${z1}`)
-  await page.waitForTimeout(500)
-  await page.screenshot({ path: `${OUT}/phone-pinched.png` })
-}, { touch: true })
+await test(
+  'phone: pinch zoom',
+  PHONE,
+  async (page) => {
+    await open(page, 'text-heavy.pdf')
+    const z0 = await state(page, () => window.__ui.getState().zoom)
+    const v = await page.locator('[data-testid=viewer]').boundingBox()
+    const cdp = await page.context().newCDPSession(page)
+    const cx = v.x + v.width / 2
+    const cy = v.y + 300
+    const pts = (d) => [
+      { x: cx - d, y: cy, id: 0 },
+      { x: cx + d, y: cy, id: 1 },
+    ]
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: pts(40) })
+    for (let d = 50; d <= 120; d += 10) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: pts(d) })
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    const z1 = await state(page, () => window.__ui.getState().zoom)
+    assert.ok(z1 > z0 * 2, `pinched ${z0} → ${z1}`)
+    await page.waitForTimeout(500)
+    await page.screenshot({ path: `${OUT}/phone-pinched.png` })
+  },
+  { touch: true },
+)
 
 await browser.close()
 await writeFile(`${OUT}/results.txt`, results.join('\n') + '\n')

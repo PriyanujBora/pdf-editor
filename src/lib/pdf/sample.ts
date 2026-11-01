@@ -4,7 +4,14 @@
  */
 
 const hex = (r: number, g: number, b: number) =>
-  '#' + [r, g, b].map((v) => Math.round(Math.min(255, Math.max(0, v))).toString(16).padStart(2, '0')).join('')
+  '#' +
+  [r, g, b]
+    .map((v) =>
+      Math.round(Math.min(255, Math.max(0, v)))
+        .toString(16)
+        .padStart(2, '0'),
+    )
+    .join('')
 
 export interface Sample {
   background: string
@@ -41,7 +48,7 @@ export function sampleColors(canvas: HTMLCanvasElement, rect: { x: number; y: nu
     buckets.set(key, e)
   }
   for (let i = 0; i < w; i++) {
-    add((i) * 4)
+    add(i * 4)
     add(((h - 1) * w + i) * 4)
   }
   for (let j = 0; j < h; j++) {

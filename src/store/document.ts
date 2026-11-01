@@ -85,7 +85,7 @@ export const useDoc = create<DocState>()(
       rotatePage: (pageId, delta) =>
         set((s) => ({
           pages: s.pages.map((p) =>
-            p.id === pageId ? { ...p, rotation: (((p.rotation + delta) % 360) + 360) % 360 as Rotation } : p,
+            p.id === pageId ? { ...p, rotation: ((((p.rotation + delta) % 360) + 360) % 360) as Rotation } : p,
           ),
         })),
 

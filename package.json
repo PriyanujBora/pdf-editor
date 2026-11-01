@@ -14,7 +14,9 @@
     "lint": "oxlint",
     "test:e2e": "node tests/e2e.mjs",
     "fixtures": "node tests/make-fixtures.mjs",
-    "cf:dev": "npm run build && wrangler dev"
+    "cf:dev": "npm run build && wrangler dev",
+    "format": "prettier --write src tests scripts",
+    "test:prod": "node tests/prod-smoke.mjs"
   },
   "dependencies": {
     "@cantoo/pdf-lib": "^2.11.1",
@@ -50,9 +52,11 @@
     "@vitejs/plugin-react": "^6.1.2",
     "oxlint": "^1.89.0",
     "playwright": "^1.64.1",
+    "prettier": "^3.9.10",
     "tailwindcss": "^4.3.3",
     "typescript": "~7.0.2",
     "vite": "^8.3.5",
-    "vite-plugin-pwa": "^2.0.0"
+    "vite-plugin-pwa": "^2.0.0",
+    "wrangler": "^4.156.0"
   }
 }

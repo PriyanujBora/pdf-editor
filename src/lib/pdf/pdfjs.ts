@@ -4,10 +4,7 @@ let loading: Promise<typeof PdfJs> | null = null
 
 /** Lazily loads pdf.js and its worker — neither is in the initial bundle. */
 export function loadPdfJs(): Promise<typeof PdfJs> {
-  loading ??= Promise.all([
-    import('pdfjs-dist'),
-    import('pdfjs-dist/build/pdf.worker.min.mjs?url'),
-  ]).then(([lib, worker]) => {
+  loading ??= Promise.all([import('pdfjs-dist'), import('pdfjs-dist/build/pdf.worker.min.mjs?url')]).then(([lib, worker]) => {
     lib.GlobalWorkerOptions.workerSrc = worker.default
     return lib
   })
@@ -24,9 +21,7 @@ export const PDFJS_ASSET_OPTIONS = {
   iccUrl: `${base}pdfjs/iccs/`,
 } as const
 
-export type OpenError =
-  | { kind: 'password'; retry: boolean }
-  | { kind: 'invalid'; message: string }
+export type OpenError = { kind: 'password'; retry: boolean } | { kind: 'invalid'; message: string }
 
 /** Maps pdf.js exceptions to something we can show a human. */
 export function classifyError(err: unknown): OpenError {

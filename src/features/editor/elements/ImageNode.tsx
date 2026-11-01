@@ -17,7 +17,10 @@ export const ImageNode = memo(function ImageNode({ el, draggable, selected, ...h
 
   useEffect(() => {
     let alive = true
-    if (asset) void assetImage(asset).then((i) => alive && setImg(i)).catch(() => {})
+    if (asset)
+      void assetImage(asset)
+        .then((i) => alive && setImg(i))
+        .catch(() => {})
     return () => {
       alive = false
     }

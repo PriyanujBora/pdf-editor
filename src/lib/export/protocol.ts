@@ -12,6 +12,4 @@ export interface ExportRequest {
 }
 
 export type ExportResponse =
-  | { type: 'progress'; value: number }
-  | { type: 'done'; bytes: Uint8Array }
-  | { type: 'error'; message: string }
+  { type: 'progress'; value: number } | { type: 'done'; bytes: Uint8Array } | { type: 'error'; message: string }

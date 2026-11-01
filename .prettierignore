@@ -1,0 +1,5 @@
+dist
+public/pdfjs
+package-lock.json
+tests/out
+tests/fixtures

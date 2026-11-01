@@ -15,10 +15,21 @@ const fontkit = {
       s._addGlyph = (gid) => {
         const i = add(gid)
         const b = s.glyf[i]
-        if (b.length % 2) { const p = b.constructor.alloc(b.length + 1); p.set(b); s.glyf[i] = p; s.offset += 1 }
+        if (b.length % 2) {
+          const p = b.constructor.alloc(b.length + 1)
+          p.set(b)
+          s.glyf[i] = p
+          s.offset += 1
+        }
         return i
       }
-      return { includeGlyph: (g) => s.includeGlyph(g), encodeStream: () => s.encodeStream(), get cff() { return s.cff } }
+      return {
+        includeGlyph: (g) => s.includeGlyph(g),
+        encodeStream: () => s.encodeStream(),
+        get cff() {
+          return s.cff
+        },
+      }
     }
     return f
   },
@@ -60,7 +71,13 @@ function wrap(text, font, size, maxW) {
     const page = doc.addPage([595, 842])
     page.drawText(`Quarterly Report ${n + 1}`, { x: 56, y: 770, size: 28, font: helvB, color: rgb(0.1, 0.25, 0.65) })
     page.drawRectangle({ x: 50, y: 700, width: 495, height: 44, color: rgb(0.93, 0.95, 0.98) })
-    page.drawText('Invoice total: $12,480.00 due 30 Nov 2026', { x: 60, y: 716, size: 14, font: roboto, color: rgb(0.1, 0.1, 0.1) })
+    page.drawText('Invoice total: $12,480.00 due 30 Nov 2026', {
+      x: 60,
+      y: 716,
+      size: 14,
+      font: roboto,
+      color: rgb(0.1, 0.1, 0.1),
+    })
     let y = 670
     for (let p = 0; p < 4; p++) {
       const font = p % 2 ? times : helv
@@ -70,7 +87,13 @@ function wrap(text, font, size, maxW) {
       }
       y -= 12
     }
-    page.drawText('Important: signed copies must be returned.', { x: 56, y: y - 10, size: 12, font: helvB, color: rgb(0.75, 0.1, 0.1) })
+    page.drawText('Important: signed copies must be returned.', {
+      x: 56,
+      y: y - 10,
+      size: 12,
+      font: helvB,
+      color: rgb(0.75, 0.1, 0.1),
+    })
     if (n === 2) page.setRotation(degrees(90))
   }
   await writeFile(`${OUT}/text-heavy.pdf`, await doc.save())

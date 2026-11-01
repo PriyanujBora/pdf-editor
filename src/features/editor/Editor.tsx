@@ -1,4 +1,5 @@
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from '@/components/ui/drawer'
+import { TooltipProvider } from '@/components/ui/tooltip'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { useAutosave, useShortcuts } from '@/hooks/use-editor-effects'
 import { useIsDesktop } from '@/hooks/use-media-query'
@@ -12,7 +13,11 @@ import { Viewer } from './Viewer'
 
 function PageCount() {
   const n = useDoc((s) => s.pages.length)
-  return <span className="text-xs text-muted-foreground tabular-nums">{n} {n === 1 ? 'page' : 'pages'}</span>
+  return (
+    <span className="text-xs text-muted-foreground tabular-nums">
+      {n} {n === 1 ? 'page' : 'pages'}
+    </span>
+  )
 }
 
 export default function Editor() {
@@ -24,24 +29,26 @@ export default function Editor() {
 
   if (desktop) {
     return (
-      <div className="flex h-full flex-col bg-workspace">
-        <Toolbar />
-        <div className="flex min-h-0 flex-1">
-          <aside className="flex w-[184px] shrink-0 flex-col border-r bg-background" aria-label="Pages">
-            <div className="flex h-10 items-center justify-between border-b px-3">
-              <span className="text-xs font-medium">Pages</span>
-              <PageCount />
-            </div>
-            <Thumbnails className="min-h-0 flex-1" />
-          </aside>
-          <main className="relative min-w-0 flex-1">
-            <Viewer />
-          </main>
-          <aside className="w-72 shrink-0 overflow-y-auto border-l bg-background" aria-label="Properties">
-            <PropertiesPanel />
-          </aside>
+      <TooltipProvider delayDuration={400}>
+        <div className="flex h-full flex-col bg-workspace">
+          <Toolbar />
+          <div className="flex min-h-0 flex-1">
+            <aside className="flex w-[184px] shrink-0 flex-col border-r bg-background" aria-label="Pages">
+              <div className="flex h-10 items-center justify-between border-b px-3">
+                <span className="text-xs font-medium">Pages</span>
+                <PageCount />
+              </div>
+              <Thumbnails className="min-h-0 flex-1" />
+            </aside>
+            <main className="relative min-w-0 flex-1">
+              <Viewer />
+            </main>
+            <aside className="w-72 shrink-0 overflow-y-auto border-l bg-background" aria-label="Properties">
+              <PropertiesPanel />
+            </aside>
+          </div>
         </div>
-      </div>
+      </TooltipProvider>
     )
   }
 

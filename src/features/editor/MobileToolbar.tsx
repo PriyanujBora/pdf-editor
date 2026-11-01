@@ -64,7 +64,6 @@ export function MobileToolbar() {
         label="Style"
         icon={SlidersHorizontal}
         disabled={!hasSelection}
-        active={hasSelection}
         onClick={() => useUi.getState().set({ propsOpen: true, editingId: null })}
       />
     </nav>
