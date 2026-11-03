@@ -102,6 +102,10 @@ public/fonts/               bundled TTFs (OFL) — Inter, Roboto, Noto Serif, No
   transform) to stop iOS zoom-on-focus.
 - Vite dev reloads the page when it discovers a new dependency; keep `optimizeDeps.include` complete or
   the e2e suite will flake.
+- Text detection heuristics (`text-blocks.ts`), tuned on real files: font size is the vertical scale,
+  except Type3 fonts (Figma/Canva — use horizontal) and OCR glyph-box fonts (ascent 1/descent 0 —
+  divide by 0.7). Skew up to ~2° counts as horizontal. TeX font names map to Noto Serif. Existing text
+  is editable from the Select tool (hit areas are invisible until hovered).
 - Edited text is **covered, not erased**: the original glyphs stay in the content stream (copy/search
   still finds them). The UI says so. Real removal = content-stream rewriting (future work).
 
