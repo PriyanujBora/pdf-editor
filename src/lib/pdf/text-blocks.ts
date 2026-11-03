@@ -1,6 +1,8 @@
 import type { PDFPageProxy } from 'pdfjs-dist'
 import type { TextItem } from 'pdfjs-dist/types/src/display/api'
 import { familyForText } from '@/lib/fonts'
+import { missingGlyphs, type OriginalFont } from '@/lib/original-font'
+import { originalFontFor, scanPageFonts } from './font-scan'
 import type { FontFamilyId } from '@/types'
 
 /** A detected line of existing text, in page space. */
@@ -17,6 +19,8 @@ export interface TextBlock {
   font: FontFamilyId
   bold: boolean
   italic: boolean
+  /** The line's own PDF font, when it can be reused for the edit. */
+  original?: OriginalFont
 }
 
 interface Piece {
@@ -28,6 +32,7 @@ interface Piece {
   ascent: number
   descent: number
   fontName: string
+  ocr: boolean
 }
 
 const cache = new Map<string, Promise<TextBlock[]>>()
@@ -35,7 +40,9 @@ const cache = new Map<string, Promise<TextBlock[]>>()
 export function getTextBlocks(page: PDFPageProxy, key: string) {
   let p = cache.get(key)
   if (!p) {
-    p = detect(page).catch(() => [])
+    p = scanPageFonts(page, key)
+      .then(() => detect(page))
+      .catch(() => [])
     cache.set(key, p)
   }
   return p
@@ -139,7 +146,7 @@ async function detect(page: PDFPageProxy): Promise<TextBlock[]> {
     const ascent = ocr ? 0.75 : style?.ascent && style.ascent > 0.4 ? style.ascent : 0.8
     const descent = ocr ? 0.25 : style?.descent && style.descent < 0 ? -style.descent : 0.22
     // it.width is in text space × scale; for horizontal text it equals page units.
-    pieces.push({ str: it.str, x: tx, baseline: ty, width: it.width, size, ascent, descent, fontName: it.fontName })
+    pieces.push({ str: it.str, x: tx, baseline: ty, width: it.width, size, ascent, descent, fontName: it.fontName, ocr })
   }
 
   pieces.sort((p, q) => p.baseline - q.baseline || p.x - q.x)
@@ -183,6 +190,11 @@ async function detect(page: PDFPageProxy): Promise<TextBlock[]> {
     const x1 = Math.max(...line.map((p) => p.x + p.width))
     const style = tc.styles[first.fontName]
     const mapped = mapFont(fontInfo(page, first.fontName), style?.fontFamily)
+    // The font that draws most of the line; reusable if it has every glyph.
+    const share = new Map<string, number>()
+    for (const p of line) if (!p.ocr) share.set(p.fontName, (share.get(p.fontName) ?? 0) + p.str.length)
+    const dominant = [...share].sort((a, b) => b[1] - a[1])[0]?.[0]
+    const original = dominant ? originalFontFor(dominant) : undefined
     blocks.push({
       id: `${Math.round(x0 * 10)}:${Math.round(baseline * 10)}`,
       text,
@@ -195,6 +207,7 @@ async function detect(page: PDFPageProxy): Promise<TextBlock[]> {
       font: familyForText(text, mapped.font),
       bold: mapped.bold,
       italic: mapped.italic,
+      original: original && missingGlyphs(text, original).length === 0 ? original : undefined,
     })
   }
   return blocks

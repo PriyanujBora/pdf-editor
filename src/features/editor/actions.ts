@@ -3,6 +3,7 @@ import { downloadBytes, editedFileName, exportPdf } from '@/lib/export/export-cl
 import { ImageError, ingestImage } from '@/lib/images'
 import { uid } from '@/lib/ids'
 import { sampleColors } from '@/lib/pdf/sample'
+import { scanDocumentInBackground } from '@/lib/pdf/font-scan'
 import type { TextBlock } from '@/lib/pdf/text-blocks'
 import { ASCENT } from '@/lib/text-layout'
 import { apply, rotate, userRotation } from '@/lib/export/matrix'
@@ -91,9 +92,13 @@ export function editTextBlock(page: PageItem, block: TextBlock) {
     align: 'left',
     lineHeight: 1.2,
     cover: { ...cover, color: colors.background, original: block.text },
+    // Use the PDF's own font by default when it has the glyphs.
+    ...(block.original ? { original: block.original, useOriginal: true } : {}),
   }
   useDoc.getState().addElement(el)
   useUi.getState().set({ selectedId: el.id, editingId: el.id })
+  const pdf = useSession.getState().pdf
+  if (pdf && block.original) scanDocumentInBackground(pdf)
 }
 
 export async function addImage(file: File) {

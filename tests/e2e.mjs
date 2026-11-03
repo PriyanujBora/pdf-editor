@@ -172,6 +172,27 @@ await test('desktop: tapping existing text in Select mode edits it', DESKTOP, as
   assert.match(await page.inputValue('textarea[aria-label="Edit text"]'), /Invoice total/)
 })
 
+await test('desktop: edits default to the PDF’s own font, fall back when a glyph is missing', DESKTOP, async (page) => {
+  await open(page, 'text-heavy.pdf')
+  await page.waitForTimeout(800)
+  const p = await pagePoint(page, 0, 120, 120) // "Invoice total…" — embedded Roboto subset (Type0)
+  await page.mouse.click(p.x, p.y)
+  await page.waitForSelector('textarea[aria-label="Edit text"]')
+  await page.keyboard.press('Control+a')
+  await page.keyboard.type('Invoice total: $12,000.00 due 30 Nov 2026')
+  await page.keyboard.press('Escape')
+  let el = (await elements(page))[0]
+  assert.equal(el.useOriginal, true)
+  assert.match(el.original.baseFont, /Roboto/)
+  assert.match(await page.textContent('[aria-label=Font]'), /Original/)
+  // "Q" was never drawn with this subset → bundled fallback + explanation.
+  await page.fill('textarea[placeholder="Type here"]', 'Quote total')
+  await page.waitForSelector('text=available in the original font')
+  el = (await elements(page))[0]
+  assert.equal(el.useOriginal, true, 'preference kept; fallback is automatic')
+  await download(page, 'original-font-export.pdf')
+})
+
 await test('desktop: complex scripts + rotated pages export', DESKTOP, async (page) => {
   await open(page, 'text-heavy.pdf')
   const addText = async (pageIdx, x, y, text) => {

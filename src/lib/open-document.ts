@@ -73,6 +73,12 @@ export async function openDocument(bytes: Uint8Array, fileName: string, opts: Op
       sourcePages.map((_, i) => ({ id: uid('p_'), srcIndex: i, rotation: 0 as Rotation }))
 
     void prev?.loadingTask.destroy()
+    // Per-document caches live in editor-only modules; once loaded, a dynamic
+    // import resolves before the new document's pages render.
+    await Promise.all([
+      import('@/lib/pdf/font-scan').then((m) => m.resetFontScan()),
+      import('@/lib/pdf/text-blocks').then((m) => m.clearTextBlockCache()),
+    ])
     useSession.getState().set({
       status: 'ready',
       progress: 1,

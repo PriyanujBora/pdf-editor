@@ -1,3 +1,5 @@
+import type { OriginalFont } from '@/lib/original-font'
+
 /**
  * Editable document model.
  *
@@ -70,6 +72,13 @@ export interface TextElement extends BaseElement {
   lineHeight: number
   /** Present when this text replaces existing PDF text. */
   cover?: Cover
+  /**
+   * The PDF's own font for this text (edited lines only). When `useOriginal`
+   * is set and every character is available in it, it is used instead of
+   * `font` — which stays the bundled fallback (and the inline-editor font).
+   */
+  original?: OriginalFont
+  useOriginal?: boolean
 }
 
 export interface ImageElement extends BaseElement {
@@ -79,6 +88,8 @@ export interface ImageElement extends BaseElement {
   width: number
   height: number
 }
+
+export type { OriginalFont }
 
 export type EditorElement = TextElement | ImageElement
 

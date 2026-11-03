@@ -12,12 +12,15 @@ import {
   Trash2,
   Undo,
 } from 'lucide-react'
+import { useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Toggle } from '@/components/ui/toggle'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { FONT_FAMILIES, FONT_LIST } from '@/lib/fonts'
+import { displayFontName, missingGlyphs } from '@/lib/original-font'
+import { refreshOriginal } from '@/lib/pdf/font-scan'
 import { cn } from '@/lib/utils'
 import { useDoc } from '@/store/document'
 import { useUi } from '@/store/ui'
@@ -42,8 +45,17 @@ function rotateBy(el: EditorElement, delta: number) {
   update(el.id, { rotation: (((Math.round(el.rotation / 90) * 90 + delta) % 360) + 360) % 360 })
 }
 
+const ORIGINAL = '__original'
+
 function TextProps({ el }: { el: TextElement }) {
   const f = FONT_FAMILIES[el.font]
+  const missing = el.original && el.useOriginal ? missingGlyphs(el.text, el.original) : []
+  // Other pages may have shown more of this font since the edit started.
+  useEffect(() => {
+    if (!missing.length || !el.original) return
+    const fresh = refreshOriginal(el.original)
+    if (Object.keys(fresh.glyphs).length > Object.keys(el.original.glyphs).length) update(el.id, { original: fresh })
+  }, [missing.length, el.id, el.original])
   const setSize = (s: number) => update(el.id, { size: Math.min(400, Math.max(2, Math.round(s * 10) / 10)) })
   return (
     <div className="grid gap-5">
@@ -59,15 +71,26 @@ function TextProps({ el }: { el: TextElement }) {
 
       <Field label="Font">
         <Select
-          value={el.font}
+          value={el.original && el.useOriginal ? ORIGINAL : el.font}
           onValueChange={(v) =>
-            update(el.id, { font: v as FontFamilyId, italic: el.italic && FONT_FAMILIES[v as FontFamilyId].hasItalic })
+            v === ORIGINAL
+              ? update(el.id, { useOriginal: true })
+              : update(el.id, {
+                  font: v as FontFamilyId,
+                  useOriginal: false,
+                  italic: el.italic && FONT_FAMILIES[v as FontFamilyId].hasItalic,
+                })
           }
         >
           <SelectTrigger className="h-11 w-full lg:h-9" aria-label="Font">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
+            {el.original && (
+              <SelectItem value={ORIGINAL} className="h-10 lg:h-8">
+                <span className="truncate">Original · {displayFontName(el.original.baseFont)}</span>
+              </SelectItem>
+            )}
             {FONT_LIST.map((font) => (
               <SelectItem key={font.id} value={font.id} className="h-10 lg:h-8">
                 <span style={{ fontFamily: `"${font.css}"` }}>{font.label}</span>
@@ -75,6 +98,12 @@ function TextProps({ el }: { el: TextElement }) {
             ))}
           </SelectContent>
         </Select>
+        {missing.length > 0 && (
+          <p className="text-xs text-muted-foreground" role="status">
+            {missing.map((c) => `“${c}”`).join(' ')} {missing.length === 1 ? 'isn’t' : 'aren’t'} available in the original font
+            (PDFs usually embed only the characters they use), so this text uses {f.label}.
+          </p>
+        )}
       </Field>
 
       <div className="grid grid-cols-2 gap-3">
@@ -113,7 +142,7 @@ function TextProps({ el }: { el: TextElement }) {
               variant="outline"
               className="h-11 flex-1 lg:h-9"
               pressed={el.bold}
-              onPressedChange={(bold) => update(el.id, { bold })}
+              onPressedChange={(bold) => update(el.id, { bold, useOriginal: false })}
               aria-label="Bold"
             >
               <Bold />
@@ -122,7 +151,7 @@ function TextProps({ el }: { el: TextElement }) {
               variant="outline"
               className="h-11 flex-1 lg:h-9"
               pressed={el.italic}
-              onPressedChange={(italic) => update(el.id, { italic })}
+              onPressedChange={(italic) => update(el.id, { italic, useOriginal: false })}
               aria-label="Italic"
               title={f.hasItalic ? 'Italic' : 'Slanted (this font has no italic)'}
             >

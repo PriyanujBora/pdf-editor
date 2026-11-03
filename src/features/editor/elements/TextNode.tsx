@@ -3,6 +3,8 @@ import { Shape } from 'react-konva'
 import type Konva from 'konva'
 import { cssFont, ensureFontLoaded } from '@/lib/fonts'
 import { measureText } from '@/lib/measure'
+import { usesOriginal } from '@/lib/original-font'
+import { useOriginalFaces } from '@/lib/pdf/font-scan'
 import { alignOffset, baselineOffset } from '@/lib/text-layout'
 import type { TextElement } from '@/types'
 import type { NodeHandlers } from './handlers'
@@ -28,10 +30,13 @@ export const TextNode = memo(function TextNode({ el, hidden, draggable, selected
     }
   }, [el.font, el.bold, el.italic, el.text])
 
+  // The PDF's own font, once pdf.js has loaded it in this session.
+  const face = useOriginalFaces((s) => (el.original ? s.faces[el.original.baseFont] : undefined))
+  const original = !!face && usesOriginal(el)
   const m = useMemo(
-    () => measureText(el),
+    () => measureText(el, original),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [el.text, el.font, el.size, el.bold, el.italic, el.lineHeight, fontTick],
+    [el.text, el.font, el.size, el.bold, el.italic, el.lineHeight, el.original, original, fontTick],
   )
 
   return (
@@ -49,13 +54,30 @@ export const TextNode = memo(function TextNode({ el, hidden, draggable, selected
       {...handlers}
       sceneFunc={(context, shape) => {
         const c = (context as unknown as { _context: CanvasRenderingContext2D })._context
-        c.font = cssFont(el.font, el.size, el.bold, el.italic)
         c.fillStyle = el.color
         c.textBaseline = 'alphabetic'
         c.textAlign = 'left'
-        m.lines.forEach((line, i) => {
-          if (line) c.fillText(line, alignOffset(el.align, m.width, m.widths[i]), baselineOffset(i, el.size, el.lineHeight))
-        })
+        if (m.encoded && face) {
+          // Original font: place each glyph by the PDF's own widths, exactly
+          // like a PDF viewer (and like the export, which reuses the codes).
+          c.font = `${el.size}px "${face}"`
+          m.encoded.forEach((line, i) => {
+            let x = alignOffset(el.align, m.width, m.widths[i])
+            const y = baselineOffset(i, el.size, el.lineHeight)
+            for (const it of line.items) {
+              if ('gap' in it) x += (it.gap / 1000) * el.size
+              else {
+                c.fillText(it.fontChar, x, y)
+                x += (it.width / 1000) * el.size
+              }
+            }
+          })
+        } else {
+          c.font = cssFont(el.font, el.size, el.bold, el.italic)
+          m.lines.forEach((line, i) => {
+            if (line) c.fillText(line, alignOffset(el.align, m.width, m.widths[i]), baselineOffset(i, el.size, el.lineHeight))
+          })
+        }
         if (!el.text) {
           // Keep empty boxes discoverable.
           c.strokeStyle = 'rgba(99,102,241,0.6)'

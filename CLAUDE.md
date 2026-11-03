@@ -106,6 +106,14 @@ public/fonts/               bundled TTFs (OFL) — Inter, Roboto, Noto Serif, No
   except Type3 fonts (Figma/Canva — use horizontal) and OCR glyph-box fonts (ascent 1/descent 0 —
   divide by 0.7). Skew up to ~2° counts as horizontal. TeX font names map to Noto Serif. Existing text
   is editable from the Select tool (hit areas are invisible until hovered).
+- **Original fonts.** Edited lines default to the PDF's own font (`TextElement.original` +
+  `useOriginal`). `lib/pdf/font-scan.ts` reads pdf.js operator lists to learn which glyphs each font has
+  actually drawn (char code, Unicode, width, pdf.js fontChar); only those are trusted, since embedded
+  fonts are subsets. Editor draws glyph-by-glyph with the pdf.js FontFace (`loadedName`); export reuses
+  the font dictionary (matched by /BaseFont, composite only if Identity-H) with the same codes via `TJ`.
+  Missing glyph → automatic fallback to the bundled `font` (panel explains). Type3, OCR glyph-less and
+  non-0.001 font-matrix fonts are never reused. Spaces a font lacks (TeX) become TJ gaps. The inline
+  textarea always shows the bundled font while typing.
 - Edited text is **covered, not erased**: the original glyphs stay in the content stream (copy/search
   still finds them). The UI says so. Real removal = content-stream rewriting (future work).
 
