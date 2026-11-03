@@ -59,15 +59,17 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
   const stageH = (rotated ? width : height) * zoom
   const gt = groupTransform(page.rotation, width, height, zoom)
 
-  // Detect existing text lazily, only when the edit-text tool is in use.
+  // Existing text is editable straight from the Select tool too (tap a line),
+  // so detect it whenever a page is mounted with either tool active.
+  const textTools = tool === 'select' || tool === 'edit-text'
   useEffect(() => {
-    if (tool !== 'edit-text' || !pdf || blocks) return
+    if (!textTools || !pdf || blocks) return
     let alive = true
     void pdf.getPage(page.srcIndex + 1).then((p) =>
       getTextBlocks(p, String(page.srcIndex)).then((b) => {
         if (!alive) return
         setBlocks(b)
-        if (!b.length && useUi.getState().currentPageId === page.id) {
+        if (!b.length && useUi.getState().tool === 'edit-text' && useUi.getState().currentPageId === page.id) {
           toast('No editable text on this page', {
             id: 'no-text',
             description: 'It may be a scanned image. You can still add new text on top.',
@@ -78,16 +80,30 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
     return () => {
       alive = false
     }
-  }, [tool, pdf, page.srcIndex, page.id, blocks])
+  }, [textTools, pdf, page.srcIndex, page.id, blocks])
+
+  // A no-text hint for scanned pages when switching to Edit text later.
+  useEffect(() => {
+    if (tool === 'edit-text' && blocks && !blocks.length && useUi.getState().currentPageId === page.id) {
+      toast('No editable text on this page', {
+        id: 'no-text',
+        description: 'It may be a scanned image. You can still add new text on top.',
+      })
+    }
+  }, [tool, blocks, page.id])
 
   const covers = elements.flatMap((e) => (e.kind === 'text' && e.cover ? [{ id: e.id, ...e.cover }] : []))
   const visibleBlocks = useMemo(() => {
-    if (tool !== 'edit-text' || !blocks) return []
+    if (!textTools || !blocks) return []
     // Hide lines that already have a replacement.
     return blocks.filter(
       (b) => !covers.some((c) => b.x < c.x + c.width && b.x + b.width > c.x && b.y < c.y + c.height && b.y + b.height > c.y),
     )
-  }, [tool, blocks, covers])
+  }, [textTools, blocks, covers])
+  // Edit-text mode outlines every line; Select mode only reveals one on hover.
+  const outlined = tool === 'edit-text'
+  const restFill = outlined ? 'rgba(99,102,241,0.07)' : 'rgba(99,102,241,0)'
+  const restStroke = outlined ? 'rgba(99,102,241,0.55)' : 'rgba(99,102,241,0)'
 
   // Attach the transformer to the selected element.
   useEffect(() => {
@@ -99,6 +115,17 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
   }, [selectedId, editingId, elements])
 
   const selectedEl = elements.find((e) => e.id === selectedId)
+
+  const onBlockTap = (b: TextBlock, touch: boolean) => {
+    const ui = useUi.getState()
+    // In Select mode the first tap away from a selection just deselects.
+    if (ui.tool === 'select' && (ui.selectedId || ui.editingId)) {
+      ui.set({ selectedId: null, editingId: null })
+      return
+    }
+    if (touch) primeKeyboard()
+    editTextBlock(page, b)
+  }
 
   const onStageTap = (e: KEvt) => {
     if (e.target !== e.target.getStage()) return
@@ -197,29 +224,29 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
               width={b.width + 2}
               height={b.height + 2}
               cornerRadius={2}
-              fill="rgba(99,102,241,0.07)"
-              stroke="rgba(99,102,241,0.55)"
-              strokeWidth={1 / zoom}
+              name="text-block"
+              fill={restFill}
+              stroke={restStroke}
+              strokeWidth={1}
               strokeScaleEnabled={false}
               preventDefault={false}
               onMouseEnter={(e) => {
-                e.target.to({ fill: 'rgba(99,102,241,0.18)', duration: 0.08 })
+                ;(e.target as Konva.Rect).fill('rgba(99,102,241,0.14)').stroke('rgba(99,102,241,0.7)')
                 const s = e.target.getStage()
                 if (s) s.container().style.cursor = 'text'
               }}
               onMouseLeave={(e) => {
-                e.target.to({ fill: 'rgba(99,102,241,0.07)', duration: 0.08 })
+                ;(e.target as Konva.Rect).fill(restFill).stroke(restStroke)
                 const s = e.target.getStage()
                 if (s) s.container().style.cursor = 'default'
               }}
               onClick={(e) => {
                 e.cancelBubble = true
-                editTextBlock(page, b)
+                onBlockTap(b, false)
               }}
               onTap={(e) => {
                 e.cancelBubble = true
-                primeKeyboard()
-                editTextBlock(page, b)
+                onBlockTap(b, true)
               }}
             />
           ))}

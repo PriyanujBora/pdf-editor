@@ -11,8 +11,22 @@ export interface ToolDef {
 }
 
 export const TOOLS: ToolDef[] = [
-  { id: 'select', label: 'Select', short: 'Select', icon: MousePointer2, key: 'V', hint: 'Select, move and resize' },
+  {
+    id: 'select',
+    label: 'Select',
+    short: 'Select',
+    icon: MousePointer2,
+    key: 'V',
+    hint: 'Select, move and resize. Tap existing text to edit it',
+  },
   { id: 'text', label: 'Add text', short: 'Text', icon: Type, key: 'T', hint: 'Tap the page to add text' },
-  { id: 'edit-text', label: 'Edit text', short: 'Edit', icon: TextCursorInput, key: 'E', hint: 'Tap existing text to edit it' },
+  {
+    id: 'edit-text',
+    label: 'Edit text',
+    short: 'Edit',
+    icon: TextCursorInput,
+    key: 'E',
+    hint: 'Show all editable text on the page',
+  },
   { id: 'image', label: 'Add image', short: 'Image', icon: ImagePlus, key: 'I', hint: 'Insert a PNG or JPG' },
 ]

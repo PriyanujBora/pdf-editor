@@ -220,7 +220,7 @@ export function PropertiesPanel({ className }: { className?: string }) {
       <div className={cn('grid gap-4 p-4 text-sm text-muted-foreground', className)}>
         <div className="flex items-start gap-3 rounded-xl bg-muted/60 p-3">
           <MousePointerClick className="mt-0.5 size-4 shrink-0" />
-          <p>{t && tool !== 'select' ? t.hint + '.' : 'Select something on the page to change it.'}</p>
+          <p>{t && tool !== 'select' ? t.hint + '.' : 'Tap any text on the page to edit it, or select something you added.'}</p>
         </div>
         <ul className="grid gap-2 px-1 text-xs">
           {TOOLS.filter((x) => x.id !== 'select').map((x) => (

@@ -163,6 +163,15 @@ await test('desktop: open text-heavy, add/edit text, image, pages, export', DESK
   console.log('   exported →', path)
 })
 
+await test('desktop: tapping existing text in Select mode edits it', DESKTOP, async (page) => {
+  await open(page, 'text-heavy.pdf')
+  await page.waitForTimeout(800) // text detection
+  const p = await pagePoint(page, 0, 120, 120) // "Invoice total…" line
+  await page.mouse.click(p.x, p.y)
+  await page.waitForSelector('textarea[aria-label="Edit text"]', { timeout: 4000 })
+  assert.match(await page.inputValue('textarea[aria-label="Edit text"]'), /Invoice total/)
+})
+
 await test('desktop: complex scripts + rotated pages export', DESKTOP, async (page) => {
   await open(page, 'text-heavy.pdf')
   const addText = async (pageIdx, x, y, text) => {

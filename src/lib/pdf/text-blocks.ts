@@ -51,6 +51,7 @@ interface FontInfo {
   italic?: boolean
   black?: boolean
   fallbackName?: string
+  type?: string
 }
 
 function fontInfo(page: PDFPageProxy, fontName: string): FontInfo {
@@ -62,29 +63,46 @@ function fontInfo(page: PDFPageProxy, fontName: string): FontInfo {
   return {}
 }
 
+/** TeX font names: CMR10, SFRM1095, ECBX1200, LMRoman10-Bold, … */
+const TEX = /^(cm|sf|ec|tc)[a-z]{1,5}\d{2,4}$|^lm(roman|sans|mono)/i
+
 /**
  * Closest bundled family for an original font. Embedded fonts are almost
  * always subsetted (missing glyphs we'd need), so we never reuse them.
  */
 function mapFont(info: FontInfo, cssFamily: string | undefined): { font: FontFamilyId; bold: boolean; italic: boolean } {
   const name = (info.name ?? '').replace(/^[A-Z]{6}\+/, '')
-  const bold = !!info.bold || !!info.black || /bold|black|heavy|semibold|demi/i.test(name)
-  const italic = !!info.italic || /italic|oblique|slanted/i.test(name)
-  let font: FontFamilyId = 'roboto'
-  if (/inter/i.test(name)) font = 'inter'
-  else if (/roboto/i.test(name)) font = 'roboto'
+  let bold = !!info.bold || !!info.black || /bold|black|heavy|semibold|demi/i.test(name)
+  let italic = !!info.italic || /italic|oblique|slanted/i.test(name)
+  // Unknown names (Type3 fonts from Figma/Canva, OCR layers) default to Inter.
+  let font: FontFamilyId = 'inter'
+  if (TEX.test(name)) {
+    // TeX: SS = sans, TT = typewriter, everything else is (Computer/Latin) Modern Roman.
+    font = /^(cm|sf|ec)ss|^lmsans/i.test(name) ? 'roboto' : /^(cm|sf|ec)tt|^lmmono/i.test(name) ? 'roboto' : 'noto-serif'
+    bold ||= /^(cm|sf|ec)(bx|b|rb|sx|ssbx|ssdc)/i.test(name)
+    italic ||= /^(cm|sf|ec)(ti|it|sl|si|bi|ssi)/i.test(name)
+  } else if (/inter/i.test(name)) font = 'inter'
+  else if (
+    /roboto|arial|helvetica|liberation ?sans|nimbus ?sans|calibri|segoe|verdana|tahoma|open ?sans|noto ?sans(?!.*(bengali|devanagari))/i.test(
+      name,
+    )
+  )
+    font = 'roboto'
   else if (/bengali|bangla|kalpurush|siyam|solaiman|vrinda/i.test(name)) font = 'noto-bengali'
   else if (/devanagari|mangal|hindi|kokila|aparajita|utsaah/i.test(name)) font = 'noto-devanagari'
   else if (
-    /times|serif|georgia|garamond|cambria|minion|palatino|book|baskerville|caslon|century|bodoni|charter|merriweather|lora|tinos|libertin/i.test(
+    /times|serif|georgia|garamond|cambria|minion|palatino|book|baskerville|caslon|century|bodoni|charter|merriweather|lora|tinos|libertin|roman/i.test(
       name,
     ) &&
     !/sans/i.test(name)
   )
     font = 'noto-serif'
-  else if (!name && (info.fallbackName === 'serif' || cssFamily === 'serif')) font = 'noto-serif'
+  else if ((!name || info.type === 'Type3') && (info.fallbackName === 'serif' || cssFamily === 'serif')) font = 'noto-serif'
   return { font, bold, italic }
 }
+
+/** Text tilted less than this (≈ 2°) counts as horizontal — OCR layers are rarely perfectly level. */
+const MAX_SKEW = 0.035
 
 async function detect(page: PDFPageProxy): Promise<TextBlock[]> {
   const vp = page.getViewport({ scale: 1 })
@@ -93,7 +111,9 @@ async function detect(page: PDFPageProxy): Promise<TextBlock[]> {
 
   for (const raw of tc.items) {
     const it = raw as TextItem
-    if (!('str' in it) || !it.str || it.dir === 'ttb') continue
+    // Whitespace-only items carry no glyphs to edit and can span column gaps
+    // (TeX \hfill); word spacing is re-inserted from positions below.
+    if (!('str' in it) || !it.str.trim() || it.dir === 'ttb') continue
     // item.transform is in PDF space; map into page space.
     const [a, b, c, d, e, f] = it.transform as number[]
     const m = vp.transform
@@ -103,13 +123,21 @@ async function detect(page: PDFPageProxy): Promise<TextBlock[]> {
     const td = m[1] * c + m[3] * d
     const tx = m[0] * e + m[2] * f + m[4]
     const ty = m[1] * e + m[3] * f + m[5]
-    // Only upright, horizontal text is editable for now.
-    if (Math.abs(tb) > 1e-3 * Math.abs(ta) || ta <= 0) continue
-    const size = Math.hypot(tc2, td)
-    if (size < 1) continue
+    // Only upright, (near-)horizontal text is editable for now.
+    if (ta <= 0 || Math.abs(tb) > MAX_SKEW * ta) continue
     const style = tc.styles[it.fontName]
-    const ascent = style?.ascent && style.ascent > 0.4 ? style.ascent : 0.8
-    const descent = style?.descent && style.descent < 0 ? -style.descent : 0.22
+    // Normally the vertical scale is the font size (OCR layers stretch the
+    // horizontal one to fit each word). Type3 fonts (Figma, Canva…) have no
+    // metrics and pdf.js inflates their vertical scale, so use the horizontal.
+    const type3 = fontInfo(page, it.fontName).type === 'Type3'
+    // OCR layers over scans use a placeholder font whose box is exactly the
+    // glyph height (ascent 1, descent 0): the vertical scale is then the cap
+    // height, ≈ 0.7 of the real font size.
+    const ocr = !!style && style.ascent >= 0.99 && Math.abs(style.descent ?? 1) < 0.01
+    const size = type3 ? Math.hypot(ta, tb) : Math.hypot(tc2, td) / (ocr ? 0.7 : 1)
+    if (size < 1) continue
+    const ascent = ocr ? 0.75 : style?.ascent && style.ascent > 0.4 ? style.ascent : 0.8
+    const descent = ocr ? 0.25 : style?.descent && style.descent < 0 ? -style.descent : 0.22
     // it.width is in text space × scale; for horizontal text it equals page units.
     pieces.push({ str: it.str, x: tx, baseline: ty, width: it.width, size, ascent, descent, fontName: it.fontName })
   }

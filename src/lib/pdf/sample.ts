@@ -78,6 +78,8 @@ export function sampleColors(canvas: HTMLCanvasElement, rect: { x: number; y: nu
   // Anti-aliasing lifts pure black/white slightly; snap near-neutral extremes.
   const neutral = Math.max(r, g, b) - Math.min(r, g, b) < 12
   if (neutral && r + g + b < 3 * 12) [r, g, b] = [0, 0, 0]
+  // Very dark with a faint tint is LCD fringing on black text, not a colour.
+  else if (!neutral && Math.max(r, g, b) < 40 && Math.max(r, g, b) - Math.min(r, g, b) < 32) [r, g, b] = [0, 0, 0]
   if (neutral && r + g + b > 3 * 240) [r, g, b] = [255, 255, 255]
   let [br, bgc, bb] = [bg.r, bg.g, bg.b]
   if (Math.max(br, bgc, bb) - Math.min(br, bgc, bb) < 6 && br + bgc + bb > 3 * 248) [br, bgc, bb] = [255, 255, 255]
