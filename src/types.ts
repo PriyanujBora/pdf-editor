@@ -32,7 +32,7 @@ export interface PageItem {
   rotation: Rotation
 }
 
-export type FontFamilyId = 'inter' | 'roboto' | 'noto-serif' | 'noto-bengali' | 'noto-devanagari'
+export type FontFamilyId = 'inter' | 'roboto' | 'tinos' | 'noto-serif' | 'noto-bengali' | 'noto-devanagari'
 export type TextAlign = 'left' | 'center' | 'right'
 
 interface BaseElement {
@@ -43,6 +43,51 @@ interface BaseElement {
   y: number
   /** Clockwise degrees around (x, y). */
   rotation: number
+}
+
+export interface PtRect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+/**
+ * How an edit on a scanned page was matched to the scan (see lib/scan/).
+ * The patch image is never stored: it is rebuilt deterministically from the
+ * page render + these numbers + the element's current text and style, so
+ * undo/redo and autosave stay small and consistent.
+ */
+export interface ScanMatch {
+  /** Patch area, page space (pt). */
+  region: PtRect
+  /** The original OCR line (hides its detection outline). */
+  lineBox: PtRect
+  /** Scan resolution, px per pt. */
+  scale: number
+  /** Text as printed (OCR), and how it was fitted — used to erase it. */
+  oldText: string
+  fitFont: FontFamilyId
+  fitBold: boolean
+  fitSizePx: number
+  /** Line start and baseline in region pixels. */
+  originX: number
+  baseline: number
+  /** Per-word horizontal offsets (px) measured on the old text. */
+  dxs: number[]
+  /** Per-word baseline offsets (px): sub-pixel alignment, slight skew. */
+  dys?: number[]
+  /** Per-word weight detected on the old text (lines often mix regular and bold). */
+  bolds?: boolean[]
+  /** Ink spread (Gaussian sigma, px) and extra stroke weight (px per side). */
+  sigma: number
+  weight?: number
+  /** Measured scanner response: rendered coverage (0..1, evenly spaced) → scanned darkness. */
+  curve: number[]
+  /** How bold words are drawn: Bold face, or Regular thickened (printed bold is often lighter). */
+  boldStyle?: { bold: boolean; weight: number }
+  /** Sampled paper colour (fallback cover). */
+  paper: string
 }
 
 /** Region of original page content hidden under a replacement text. */
@@ -79,6 +124,8 @@ export interface TextElement extends BaseElement {
    */
   original?: OriginalFont
   useOriginal?: boolean
+  /** Edit on a scanned page, drawn into the scan instead of on top of it. */
+  scan?: ScanMatch
 }
 
 export interface ImageElement extends BaseElement {

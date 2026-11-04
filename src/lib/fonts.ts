@@ -19,6 +19,15 @@ export interface FontFamilyDef {
 export const FONT_FAMILIES: Record<FontFamilyId, FontFamilyDef> = {
   inter: { id: 'inter', label: 'Inter', css: 'PDF Inter', file: 'Inter', hasItalic: true, ascent: 0.9688, descent: 0.2412 },
   roboto: { id: 'roboto', label: 'Roboto', css: 'PDF Roboto', file: 'Roboto', hasItalic: true, ascent: 0.9277, descent: 0.2441 },
+  tinos: {
+    id: 'tinos',
+    label: 'Tinos (Times)',
+    css: 'PDF Tinos',
+    file: 'Tinos',
+    hasItalic: true,
+    ascent: 0.8911,
+    descent: 0.2163,
+  },
   'noto-serif': {
     id: 'noto-serif',
     label: 'Noto Serif',

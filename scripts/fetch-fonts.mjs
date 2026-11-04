@@ -5,6 +5,8 @@ import { writeFile, mkdir } from 'node:fs/promises'
 const FAMILIES = {
   Inter: { file: 'Inter', italic: true },
   Roboto: { file: 'Roboto', italic: true },
+  // Metric-compatible with Times New Roman: used for Times documents and scans.
+  Tinos: { file: 'Tinos', italic: true },
   'Noto Serif': { file: 'NotoSerif', italic: true },
   'Noto Sans Bengali': { file: 'NotoSansBengali', italic: false },
   'Noto Sans Devanagari': { file: 'NotoSansDevanagari', italic: false },

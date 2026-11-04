@@ -32,6 +32,22 @@ interface FontRecord {
 }
 
 const byBase = new Map<string, FontRecord>()
+/** Fonts drawn with an invisible render mode (3/7): OCR text layers over scans. */
+const invisible = new Set<string>()
+/** Pixel width of the largest image painted on each page (scan detection). */
+const largestImage = new Map<string, number>()
+
+/** The page's largest image XObject and where it is drawn (PDF user space). */
+export interface PageImage {
+  objId: string
+  width: number
+  height: number
+  /** Maps the image's unit square to PDF user space. */
+  ctm: number[]
+}
+const pageImages = new Map<string, PageImage>()
+
+export const pageImage = (key: string) => pageImages.get(key)
 const byLoaded = new Map<string, FontRecord>()
 const scanned = new Map<string, Promise<void>>()
 
@@ -42,6 +58,9 @@ export function resetFontScan() {
   backgroundStarted = false
   byBase.clear()
   byLoaded.clear()
+  invisible.clear()
+  largestImage.clear()
+  pageImages.clear()
   scanned.clear()
   useOriginalFaces.setState({ faces: {} })
 }
@@ -57,16 +76,23 @@ function reusable(f: PdfJsFont) {
 export function scanPageFonts(page: PDFPageProxy, key: string): Promise<void> {
   let p = scanned.get(key)
   if (!p) {
-    p = scan(page).catch(() => {})
+    p = scan(page, key).catch(() => {})
     scanned.set(key, p)
   }
   return p
 }
 
-async function scan(page: PDFPageProxy) {
+async function scan(page: PDFPageProxy, key: string) {
   const { OPS } = await loadPdfJs()
   const ops = await page.getOperatorList()
   let current: string | null = null
+  let mode = 0
+  const modes: number[] = []
+  let maxImage = 0
+  // Current transformation matrix, to know where the page image sits.
+  let ctm = [1, 0, 0, 1, 0, 0]
+  const ctms: number[][] = []
+  let image: PageImage | null = null
   const faces: Record<string, string> = {}
   for (let i = 0; i < ops.fnArray.length; i++) {
     const fn = ops.fnArray[i]
@@ -74,7 +100,30 @@ async function scan(page: PDFPageProxy) {
       current = ops.argsArray[i][0] as string
       continue
     }
+    if (fn === OPS.save) {
+      modes.push(mode)
+      ctms.push(ctm)
+    } else if (fn === OPS.restore) {
+      mode = modes.pop() ?? 0
+      ctm = ctms.pop() ?? [1, 0, 0, 1, 0, 0]
+    } else if (fn === OPS.transform) {
+      const [a, b, c, d, e, f] = ops.argsArray[i] as number[]
+      const [A, B, C, D, E, F] = ctm
+      ctm = [a * A + b * C, a * B + b * D, c * A + d * C, c * B + d * D, e * A + f * C + E, e * B + f * D + F]
+    } else if (fn === OPS.setTextRenderingMode) mode = ops.argsArray[i][0] as number
+    else if (fn === OPS.paintImageXObject || fn === OPS.paintInlineImageXObject) {
+      const w = (ops.argsArray[i][1] as number) ?? (ops.argsArray[i][0] as { width?: number })?.width ?? 0
+      if (typeof w === 'number' && w > maxImage) {
+        maxImage = w
+        if (fn === OPS.paintImageXObject)
+          image = { objId: ops.argsArray[i][0] as string, width: w, height: ops.argsArray[i][2] as number, ctm: ctm.slice() }
+      }
+    }
     if (fn !== OPS.showText || !current) continue
+    if (mode === 3 || mode === 7) {
+      invisible.add(current)
+      continue
+    }
     let rec = byLoaded.get(current)
     if (!rec) {
       let info: PdfJsFont
@@ -103,7 +152,19 @@ async function scan(page: PDFPageProxy) {
     }
     if (glyphs[' ']) rec.font.spaceGap = glyphs[' '][1]
   }
+  largestImage.set(key, maxImage)
+  if (image) pageImages.set(key, image)
   if (Object.keys(faces).length) useOriginalFaces.setState((s) => ({ faces: { ...s.faces, ...faces } }))
+}
+
+/** True when this pdf.js font only ever draws invisible (OCR) text. */
+export function isInvisibleFont(loadedName: string) {
+  return invisible.has(loadedName) && !byLoaded.has(loadedName)
+}
+
+/** Width in pixels of the largest image on a scanned page (0 if none / not scanned yet). */
+export function largestImageWidth(key: string) {
+  return largestImage.get(key) ?? 0
 }
 
 /** Snapshot of everything known about the font pdf.js loaded as `loadedName`. */

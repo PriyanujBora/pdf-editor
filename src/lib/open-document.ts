@@ -78,6 +78,8 @@ export async function openDocument(bytes: Uint8Array, fileName: string, opts: Op
     await Promise.all([
       import('@/lib/pdf/font-scan').then((m) => m.resetFontScan()),
       import('@/lib/pdf/text-blocks').then((m) => m.clearTextBlockCache()),
+      import('@/lib/scan/compose').then((m) => m.clearScanCaches()),
+      import('@/lib/scan/pixels').then((m) => m.clearPixelCache()),
     ])
     useSession.getState().set({
       status: 'ready',

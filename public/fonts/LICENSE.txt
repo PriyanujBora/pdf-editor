@@ -1,3 +1,5 @@
-The fonts in this folder (Inter, Roboto, Noto Serif, Noto Sans Bengali, Noto Sans Devanagari) are
-licensed under the SIL Open Font License, Version 1.1 — https://openfontlicense.org
-They were downloaded from Google Fonts by scripts/fetch-fonts.mjs.
+Inter, Roboto, Noto Serif, Noto Sans Bengali and Noto Sans Devanagari are licensed under the
+SIL Open Font License, Version 1.1 — https://openfontlicense.org
+Tinos (metric-compatible with Times New Roman) is licensed under the Apache License, Version 2.0 —
+https://www.apache.org/licenses/LICENSE-2.0
+All were downloaded from Google Fonts by scripts/fetch-fonts.mjs.

@@ -1,6 +1,20 @@
 // Generates test PDFs into tests/fixtures. Run: npm run fixtures
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { PDFDocument, StandardFonts, rgb, degrees } from '@cantoo/pdf-lib'
+import {
+  PDFDocument,
+  StandardFonts,
+  rgb,
+  degrees,
+  pushGraphicsState,
+  popGraphicsState,
+  beginText,
+  endText,
+  setTextRenderingMode,
+  TextRenderingMode,
+  setFontAndSize,
+  setTextMatrix,
+  showText,
+} from '@cantoo/pdf-lib'
 import rawFontkit from '@pdf-lib/fontkit'
 
 // Same adapter as src/lib/export/fontkit-compat.ts.
@@ -134,6 +148,44 @@ function wrap(text, font, size, maxW) {
   }
   await browser.close()
   await writeFile(`${OUT}/scanned.pdf`, await doc.save())
+}
+
+// 3b. Scanned + invisible OCR text layer (render mode 3), like ABBYY/Acrobat OCR output.
+{
+  const lines = [
+    'MEMORANDUM OF UNDERSTANDING',
+    'This letter confirms the sanction of the research grant described below.',
+    'Principal Investigator: Dr. Ananya Barua, Department of Physics',
+    'Total amount sanctioned: Rs. 2,40,000 for a period of one year.',
+    'The grant is subject to the terms and conditions listed overleaf.',
+  ]
+  const top = (i) => 120 + i * 30
+  const browser = await chromium.launch()
+  const page = await browser.newPage({ viewport: { width: 612, height: 792 }, deviceScaleFactor: 200 / 72 })
+  await page.setContent(`<body style="margin:0;width:612px;height:792px;background:#f3f1ea;position:relative;filter:blur(0.25px)">
+    <svg width="612" height="792" style="position:absolute;inset:0;opacity:.18"><filter id="n"><feTurbulence type="fractalNoise" baseFrequency="2.2" numOctaves="1" seed="4"/></filter><rect width="100%" height="100%" filter="url(#n)"/></svg>
+    ${lines
+      .map(
+        (t, i) =>
+          `<div style="position:absolute;left:72px;top:${top(i)}px;font:${i ? 400 : 700} 13px/1 'Times New Roman',Times,serif;color:#262626">${t}</div>`,
+      )
+      .join('')}</body>`)
+  const jpg = await page.screenshot({ type: 'jpeg', quality: 80 })
+  await browser.close()
+
+  const doc = await PDFDocument.create()
+  const helv = await doc.embedFont(StandardFonts.Helvetica)
+  const p = doc.addPage([612, 792])
+  p.drawImage(await doc.embedJpg(jpg), { x: 0, y: 0, width: 612, height: 792 })
+  const key = p.node.newFontDictionary('OCR', helv.ref)
+  const ops = [pushGraphicsState(), beginText(), setTextRenderingMode(TextRenderingMode.Invisible)]
+  lines.forEach((t, i) => {
+    // Times baseline ≈ top + 0.891 em
+    ops.push(setFontAndSize(key, 13), setTextMatrix(1, 0, 0, 1, 72, 792 - (top(i) + 13 * 0.891)), showText(helv.encodeText(t)))
+  })
+  ops.push(endText(), popGraphicsState())
+  p.pushOperators(...ops)
+  await writeFile(`${OUT}/scanned-ocr.pdf`, await doc.save())
 }
 
 // 4. Encrypted (user password "secret").

@@ -20,6 +20,8 @@ import {
   setFillingRgbColor,
   setFontAndSize,
   setTextMatrix,
+  setTextRenderingMode,
+  TextRenderingMode,
   showText,
   type PDFFont,
   type PDFImage,
@@ -62,6 +64,9 @@ async function buildPdf(req: ExportRequest): Promise<Uint8Array> {
   if (title) out.setTitle(title)
   out.setProducer('Free PDF Editor (pdf-lib)')
   out.setCreator('Free PDF Editor')
+  // Scan-matched edits are hard to spot by eye; say so in the metadata.
+  if (req.elements.some((el) => el.kind === 'text' && el.scan))
+    out.setKeywords(['Edited with Free PDF Editor: text on scanned pages was altered'])
 
   const copied = await out.copyPages(
     src,
@@ -84,10 +89,25 @@ async function buildPdf(req: ExportRequest): Promise<Uint8Array> {
     const els = req.elements.filter((el) => el.pageId === item.id)
 
     // Covers first so no replacement text is hidden by another cover.
+    // Scan-matched edits are part of the page image: draw them first, with an
+    // invisible text layer so the new words stay searchable/selectable.
+    for (const el of els) {
+      if (el.kind !== 'text' || !el.scan) continue
+      const png = req.scanPatches[el.id]
+      if (png) {
+        const img = await out.embedPng(png)
+        const r = el.scan.region
+        withFrame(page, mul(toPdf, elementFrame(r.x, r.y, 0)), () =>
+          page.drawImage(img, { x: 0, y: -r.height, width: r.width, height: r.height }),
+        )
+      }
+      await drawText(page, toPdf, el, fonts, true)
+    }
     for (const el of els) {
       if (el.kind === 'text' && el.cover) drawCover(page, toPdf, el.cover)
     }
     for (const el of els) {
+      if (el.kind === 'text' && el.scan) continue
       if (el.kind === 'text') {
         if (!drawOriginalText(page, toPdf, el, originals)) await drawText(page, toPdf, el, fonts)
       } else await drawImage(page, toPdf, el, req, images, out)
@@ -240,7 +260,7 @@ async function shapeLine(line: string, el: TextElement, fonts: FontCache): Promi
   return { runs, width }
 }
 
-async function drawText(page: PDFPage, toPdf: Mat, el: TextElement, fonts: FontCache) {
+async function drawText(page: PDFPage, toPdf: Mat, el: TextElement, fonts: FontCache, invisible = false) {
   const lines = splitLines(el.text)
   const shaped = await Promise.all(lines.map((l) => shapeLine(l, el, fonts)))
   const boxW = Math.max(0, ...shaped.map((s) => s.width))
@@ -248,6 +268,7 @@ async function drawText(page: PDFPage, toPdf: Mat, el: TextElement, fonts: FontC
   withFrame(page, mul(toPdf, elementFrame(el.x, el.y, el.rotation)), () => {
     const c = hexToRgb(el.color)
     page.pushOperators(setFillingRgbColor(c.red, c.green, c.blue), beginText())
+    if (invisible) page.pushOperators(setTextRenderingMode(TextRenderingMode.Invisible))
     shaped.forEach((line, i) => {
       const yb = -baselineOffset(i, el.size, el.lineHeight)
       let pen = alignOffset(el.align, boxW, line.width)

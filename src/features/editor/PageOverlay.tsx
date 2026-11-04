@@ -13,6 +13,8 @@ import type { EditorElement, PageItem } from '@/types'
 import { createTextAt, editTextBlock } from './actions'
 import { ImageNode } from './elements/ImageNode'
 import { TextNode } from './elements/TextNode'
+import { ScanTextNode } from './elements/ScanTextNode'
+import { isScanText } from '@/lib/scan/compose'
 
 interface Props {
   page: PageItem
@@ -93,13 +95,16 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
   }, [tool, blocks, page.id])
 
   const covers = elements.flatMap((e) => (e.kind === 'text' && e.cover ? [{ id: e.id, ...e.cover }] : []))
+  // Lines already replaced (vector cover or scan-matched) are not offered again.
+  const replaced = [...covers, ...elements.flatMap((e) => (e.kind === 'text' && e.scan ? [e.scan.lineBox] : []))]
   const visibleBlocks = useMemo(() => {
     if (!textTools || !blocks) return []
     // Hide lines that already have a replacement.
     return blocks.filter(
-      (b) => !covers.some((c) => b.x < c.x + c.width && b.x + b.width > c.x && b.y < c.y + c.height && b.y + b.height > c.y),
+      (b) => !replaced.some((c) => b.x < c.x + c.width && b.x + b.width > c.x && b.y < c.y + c.height && b.y + b.height > c.y),
     )
-  }, [textTools, blocks, covers])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [textTools, blocks, elements])
   // Edit-text mode outlines every line; Select mode only reveals one on hover.
   const outlined = tool === 'edit-text'
   const restFill = outlined ? 'rgba(99,102,241,0.07)' : 'rgba(99,102,241,0)'
@@ -109,7 +114,11 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
   useEffect(() => {
     const tr = trRef.current
     if (!tr) return
-    const node = selectedId && selectedId !== editingId ? groupRef.current?.findOne<Konva.Node>('#' + selectedId) : null
+    const sel = elements.find((e) => e.id === selectedId)
+    // Scan-matched text is locked to its line: no move/resize handles.
+    const locked = sel?.kind === 'text' && !!sel.scan
+    const node =
+      selectedId && selectedId !== editingId && !locked ? groupRef.current?.findOne<Konva.Node>('#' + selectedId) : null
     tr.nodes(node ? [node] : [])
     tr.getLayer()?.batchDraw()
   }, [selectedId, editingId, elements])
@@ -252,7 +261,21 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
           ))}
 
           {elements.map((el) =>
-            el.kind === 'text' ? (
+            el.kind === 'text' && isScanText(el) ? (
+              <ScanTextNode
+                key={el.id}
+                el={el}
+                editing={el.id === editingId}
+                selected={el.id === selectedId}
+                {...handlersFor(el)}
+                onDragEnd={undefined}
+                onTransformEnd={undefined}
+              />
+            ) : null,
+          )}
+
+          {elements.map((el) =>
+            el.kind === 'text' && el.scan ? null : el.kind === 'text' ? (
               <TextNode
                 key={el.id}
                 el={el}

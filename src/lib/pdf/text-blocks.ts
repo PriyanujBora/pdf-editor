@@ -2,7 +2,7 @@ import type { PDFPageProxy } from 'pdfjs-dist'
 import type { TextItem } from 'pdfjs-dist/types/src/display/api'
 import { familyForText } from '@/lib/fonts'
 import { missingGlyphs, type OriginalFont } from '@/lib/original-font'
-import { originalFontFor, scanPageFonts } from './font-scan'
+import { isInvisibleFont, originalFontFor, scanPageFonts } from './font-scan'
 import type { FontFamilyId } from '@/types'
 
 /** A detected line of existing text, in page space. */
@@ -21,6 +21,8 @@ export interface TextBlock {
   italic: boolean
   /** The line's own PDF font, when it can be reused for the edit. */
   original?: OriginalFont
+  /** Invisible OCR text over a scanned image: edit by matching the scan. */
+  ocr: boolean
 }
 
 interface Piece {
@@ -95,6 +97,7 @@ function mapFont(info: FontInfo, cssFamily: string | undefined): { font: FontFam
     )
   )
     font = 'roboto'
+  else if (/times|tinos|liberation ?serif|nimbus ?rom|thorndale/i.test(name)) font = 'tinos'
   else if (/bengali|bangla|kalpurush|siyam|solaiman|vrinda/i.test(name)) font = 'noto-bengali'
   else if (/devanagari|mangal|hindi|kokila|aparajita|utsaah/i.test(name)) font = 'noto-devanagari'
   else if (
@@ -151,21 +154,37 @@ async function detect(page: PDFPageProxy): Promise<TextBlock[]> {
 
   pieces.sort((p, q) => p.baseline - q.baseline || p.x - q.x)
 
-  // Group into lines: same baseline (± 25% size), similar size, no big gaps.
-  const lines: Piece[][] = []
+  // 1. Cluster by baseline. OCR layers put each word's box bottom at its
+  //    lowest ink, so words with descenders sit slightly lower: compare with
+  //    the cluster's running median, not the previous word.
+  const rows: { pieces: Piece[]; base: number; size: number }[] = []
   for (const p of pieces) {
-    const line = lines.find((l) => {
-      const last = l[l.length - 1]
-      const gap = p.x - (last.x + last.width)
-      return (
-        Math.abs(last.baseline - p.baseline) < 0.25 * Math.max(last.size, p.size) &&
-        Math.abs(last.size - p.size) < 0.35 * last.size &&
-        gap > -0.5 * p.size &&
-        gap < 1.2 * p.size
-      )
-    })
-    if (line) line.push(p)
-    else lines.push([p])
+    const tol = (p.ocr ? 0.4 : 0.25) * p.size
+    const row = rows.findLast(
+      (r) => Math.abs(r.base - p.baseline) < Math.max(tol, 0.25 * r.size) && Math.abs(r.size - p.size) < 0.5 * r.size,
+    )
+    if (row) {
+      row.pieces.push(p)
+      row.base = median(row.pieces.map((q) => q.baseline))
+      row.size = median(row.pieces.map((q) => q.size))
+    } else rows.push({ pieces: [p], base: p.baseline, size: p.size })
+  }
+
+  // 2. Within a row, order by x and split at column-sized gaps.
+  const lines: Piece[][] = []
+  for (const row of rows) {
+    row.pieces.sort((p, q) => p.x - q.x)
+    let cur: Piece[] = []
+    for (const p of row.pieces) {
+      const last = cur[cur.length - 1]
+      const gap = last ? p.x - (last.x + last.width) : 0
+      if (last && (gap > 1.2 * Math.max(row.size, p.size) || gap < -0.5 * p.size)) {
+        lines.push(cur)
+        cur = []
+      }
+      cur.push(p)
+    }
+    if (cur.length) lines.push(cur)
   }
 
   const blocks: TextBlock[] = []
@@ -175,17 +194,26 @@ async function detect(page: PDFPageProxy): Promise<TextBlock[]> {
     let prevEnd = -Infinity
     for (const p of line) {
       const gap = p.x - prevEnd
-      if (text && gap > 0.18 * p.size && !/\s$/.test(text) && !/^\s/.test(p.str)) text += ' '
+      // OCR layers emit one item per word, sometimes almost touching.
+      const minGap = p.ocr || isInvisibleFont(p.fontName) ? 0.02 : 0.18
+      if (text && gap > minGap * p.size && !/\s$/.test(text) && !/^\s/.test(p.str)) text += ' '
       text += p.str
       prevEnd = p.x + p.width
     }
     text = text.replace(/\s+$/, '').replace(/^\s+/, '')
     if (!text) continue
     const first = line.find((p) => p.str.trim()) ?? line[0]
-    const size = Math.max(...line.map((p) => p.size))
+    // OCR glyph boxes vary per word (caps, descenders): use typical values.
+    const ocrLine = line.every((p) => p.ocr)
+    const size = ocrLine ? median(line.map((p) => p.size)) : Math.max(...line.map((p) => p.size))
     const asc = Math.max(...line.map((p) => p.ascent))
     const desc = Math.max(...line.map((p) => p.descent))
-    const baseline = line.reduce((s, p) => s + p.baseline, 0) / line.length
+    const baseline = ocrLine
+      ? quantile(
+          line.map((p) => p.baseline),
+          0.2,
+        )
+      : line.reduce((s, p) => s + p.baseline, 0) / line.length
     const x0 = first.x
     const x1 = Math.max(...line.map((p) => p.x + p.width))
     const style = tc.styles[first.fontName]
@@ -208,7 +236,15 @@ async function detect(page: PDFPageProxy): Promise<TextBlock[]> {
       bold: mapped.bold,
       italic: mapped.italic,
       original: original && missingGlyphs(text, original).length === 0 ? original : undefined,
+      ocr: line.every((p) => p.ocr || isInvisibleFont(p.fontName)),
     })
   }
   return blocks
 }
+
+function quantile(v: number[], q: number) {
+  const a = v.slice().sort((x, y) => x - y)
+  return a[Math.min(a.length - 1, Math.max(0, Math.round(q * (a.length - 1))))]
+}
+
+const median = (v: number[]) => quantile(v, 0.5)

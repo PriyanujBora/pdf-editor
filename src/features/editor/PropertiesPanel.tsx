@@ -11,6 +11,7 @@ import {
   RotateCw,
   Trash2,
   Undo,
+  Square,
 } from 'lucide-react'
 import { useEffect } from 'react'
 import { Button } from '@/components/ui/button'
@@ -46,6 +47,24 @@ function rotateBy(el: EditorElement, delta: number) {
 }
 
 const ORIGINAL = '__original'
+
+/** Switch a scan-matched edit to the plain approach: paper-coloured cover + text on top. */
+function plainPatch(el: TextElement) {
+  if (!el.scan) return
+  const b = el.scan.lineBox
+  const pad = Math.max(1, el.size * 0.08)
+  update(el.id, {
+    scan: undefined,
+    cover: {
+      x: b.x - pad,
+      y: b.y - pad,
+      width: b.width + 2 * pad,
+      height: b.height + 2 * pad,
+      color: el.scan.paper,
+      original: el.scan.oldText,
+    },
+  })
+}
 
 function TextProps({ el }: { el: TextElement }) {
   const f = FONT_FAMILIES[el.font]
@@ -190,25 +209,46 @@ function TextProps({ el }: { el: TextElement }) {
         </div>
       </Field>
 
-      <Field label="Align">
-        <ToggleGroup
-          type="single"
-          variant="outline"
-          value={el.align}
-          onValueChange={(v) => v && update(el.id, { align: v as TextAlign })}
-          className="w-full"
-        >
-          <ToggleGroupItem value="left" aria-label="Align left" className="h-11 flex-1 lg:h-9">
-            <AlignLeft />
-          </ToggleGroupItem>
-          <ToggleGroupItem value="center" aria-label="Align center" className="h-11 flex-1 lg:h-9">
-            <AlignCenter />
-          </ToggleGroupItem>
-          <ToggleGroupItem value="right" aria-label="Align right" className="h-11 flex-1 lg:h-9">
-            <AlignRight />
-          </ToggleGroupItem>
-        </ToggleGroup>
-      </Field>
+      {!el.scan && (
+        <Field label="Align">
+          <ToggleGroup
+            type="single"
+            variant="outline"
+            value={el.align}
+            onValueChange={(v) => v && update(el.id, { align: v as TextAlign })}
+            className="w-full"
+          >
+            <ToggleGroupItem value="left" aria-label="Align left" className="h-11 flex-1 lg:h-9">
+              <AlignLeft />
+            </ToggleGroupItem>
+            <ToggleGroupItem value="center" aria-label="Align center" className="h-11 flex-1 lg:h-9">
+              <AlignCenter />
+            </ToggleGroupItem>
+            <ToggleGroupItem value="right" aria-label="Align right" className="h-11 flex-1 lg:h-9">
+              <AlignRight />
+            </ToggleGroupItem>
+          </ToggleGroup>
+        </Field>
+      )}
+
+      {el.scan && (
+        <div className="rounded-xl border border-dashed p-3 text-sm" data-testid="scan-match">
+          <p className="text-xs font-medium text-muted-foreground">Blended into the scan</p>
+          <p className="mt-1 line-clamp-2 break-words">{el.scan.oldText}</p>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Old letters are repainted with the page’s paper; the new ones get the scan’s ink, blur and grain. The downloaded PDF
+            keeps a searchable text layer and notes that it was edited.
+          </p>
+          <div className="mt-2 grid">
+            <Button variant="ghost" className="h-10 justify-start gap-2 lg:h-8" onClick={() => plainPatch(el)}>
+              <Square /> Use a plain patch instead
+            </Button>
+            <Button variant="ghost" className="h-10 justify-start gap-2 lg:h-8" onClick={deleteSelected}>
+              <Undo /> Restore original
+            </Button>
+          </div>
+        </div>
+      )}
 
       {el.cover && (
         <div className="rounded-xl border border-dashed p-3 text-sm">
@@ -243,6 +283,9 @@ export function PropertiesPanel({ className }: { className?: string }) {
   const el = useDoc((s) => (selectedId ? s.elements[selectedId] : undefined))
   const tool = useUi((s) => s.tool)
 
+  // Scan-matched text is locked to its line.
+  const locked = el?.kind === 'text' && !!el.scan
+
   if (!el) {
     const t = TOOLS.find((x) => x.id === tool)
     return (
@@ -265,8 +308,8 @@ export function PropertiesPanel({ className }: { className?: string }) {
   return (
     <div className={cn('grid gap-5 p-4', className)}>
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold">{el.kind === 'text' ? (el.cover ? 'Edited text' : 'Text') : 'Image'}</h2>
-        <div className="flex gap-1">
+        <h2 className="text-sm font-semibold">{el.kind === 'text' ? (el.cover || el.scan ? 'Edited text' : 'Text') : 'Image'}</h2>
+        <div className={cn('flex gap-1', locked && 'hidden')}>
           <Button
             variant="ghost"
             size="icon"
@@ -288,19 +331,21 @@ export function PropertiesPanel({ className }: { className?: string }) {
         </div>
       </div>
       {el.kind === 'text' ? <TextProps el={el} /> : <ImageProps el={el} />}
-      <Field label="Rotation">
-        <div className="flex items-center gap-2">
-          <Input
-            type="number"
-            inputMode="numeric"
-            value={Math.round(el.rotation)}
-            onChange={(e) => update(el.id, { rotation: ((+e.target.value % 360) + 360) % 360 })}
-            className="h-11 w-24 text-base tabular-nums md:text-sm lg:h-9"
-            aria-label="Rotation in degrees"
-          />
-          <span className="text-sm text-muted-foreground">degrees</span>
-        </div>
-      </Field>
+      {!locked && (
+        <Field label="Rotation">
+          <div className="flex items-center gap-2">
+            <Input
+              type="number"
+              inputMode="numeric"
+              value={Math.round(el.rotation)}
+              onChange={(e) => update(el.id, { rotation: ((+e.target.value % 360) + 360) % 360 })}
+              className="h-11 w-24 text-base tabular-nums md:text-sm lg:h-9"
+              aria-label="Rotation in degrees"
+            />
+            <span className="text-sm text-muted-foreground">degrees</span>
+          </div>
+        </Field>
+      )}
       <Button variant="destructive" className="h-11 gap-2 lg:h-9" onClick={deleteSelected} data-testid="delete-element">
         <Trash2 /> Delete
       </Button>

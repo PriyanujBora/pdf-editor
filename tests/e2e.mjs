@@ -193,6 +193,30 @@ await test('desktop: edits default to the PDF’s own font, fall back when a gly
   await download(page, 'original-font-export.pdf')
 })
 
+await test('desktop: editing OCR text on a scan blends into the scan', DESKTOP, async (page) => {
+  await open(page, 'scanned-ocr.pdf')
+  await page.waitForTimeout(1200)
+  const p = await pagePoint(page, 0, 160, 188) // "Principal Investigator: Dr. Ananya Barua, …"
+  await page.mouse.click(p.x, p.y)
+  await page.waitForSelector('textarea[aria-label="Edit text"]', { timeout: 15000 })
+  let el = (await elements(page))[0]
+  assert.ok(el.scan, 'scan-matched (invisible OCR layer detected)')
+  assert.equal(el.font, 'tinos', `Times-like scan matched to Tinos (${el.font})`)
+  assert.ok(Math.abs(el.size - 13) < 1.2, `size fitted (${el.size})`)
+  const v = await page.inputValue('textarea[aria-label="Edit text"]')
+  await page.fill('textarea[aria-label="Edit text"]', v.replace('Barua', 'Baruah'))
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(800)
+  el = (await elements(page))[0]
+  assert.match(el.text, /Baruah/)
+  // Locked to its line: no transformer handles, panel explains.
+  await page.evaluate((id) => window.__ui.getState().select(id), el.id)
+  await page.waitForSelector('[data-testid=scan-match]')
+  await page.screenshot({ path: `${OUT}/desktop-scan-edit.png` })
+  const path = await download(page, 'scan-edit-export.pdf')
+  console.log('   exported →', path)
+})
+
 await test('desktop: complex scripts + rotated pages export', DESKTOP, async (page) => {
   await open(page, 'text-heavy.pdf')
   const addText = async (pageIdx, x, y, text) => {

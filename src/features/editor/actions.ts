@@ -4,6 +4,7 @@ import { ImageError, ingestImage } from '@/lib/images'
 import { uid } from '@/lib/ids'
 import { sampleColors } from '@/lib/pdf/sample'
 import { scanDocumentInBackground } from '@/lib/pdf/font-scan'
+import { fitScanLine } from '@/lib/scan/fit'
 import type { TextBlock } from '@/lib/pdf/text-blocks'
 import { ASCENT } from '@/lib/text-layout'
 import { apply, rotate, userRotation } from '@/lib/export/matrix'
@@ -57,8 +58,70 @@ export function createTextAt(pageId: string, x: number, y: number) {
   useUi.getState().set({ tool: 'select', selectedId: el.id, editingId: el.id })
 }
 
+const SCAN_FALLBACK: Record<string, string> = {
+  faint: 'the text here is too faint',
+  busy: 'the background here is too busy',
+  'no-match': 'no bundled font is close enough',
+}
+
+let fitting: string | null = null
+
+/** Edit a line of OCR text on a scanned page by drawing into the scan itself. */
+async function editScanBlock(page: PageItem, block: TextBlock) {
+  if (fitting === block.id) return
+  fitting = block.id
+  const { pdf, sourcePages } = useSession.getState()
+  const info = sourcePages[page.srcIndex]
+  let toastId: string | number | undefined
+  const slow = setTimeout(() => (toastId = toast.loading('Matching the scan…')), 250)
+  try {
+    const fit = pdf ? await fitScanLine(await pdf.getPage(page.srcIndex + 1), info, page.srcIndex, block) : null
+    clearTimeout(slow)
+    if (!fit?.ok) {
+      const why = fit && !fit.ok ? SCAN_FALLBACK[fit.reason] : undefined
+      if (why) toast(`Couldn’t blend into the scan: ${why}`, { id: toastId, description: 'Using a plain patch instead.' })
+      else if (toastId !== undefined) toast.dismiss(toastId)
+      editVectorBlock(page, block)
+      return
+    }
+    if (toastId !== undefined) toast.dismiss(toastId)
+    const el: TextElement = {
+      id: uid('t_'),
+      kind: 'text',
+      pageId: page.id,
+      x: fit.x,
+      y: fit.y,
+      rotation: 0,
+      text: block.text,
+      font: fit.font,
+      size: fit.size,
+      color: fit.color,
+      bold: fit.bold,
+      italic: false,
+      align: 'left',
+      lineHeight: 1.2,
+      scan: fit.match,
+    }
+    useDoc.getState().addElement(el)
+    useUi.getState().set({ selectedId: el.id, editingId: el.id })
+  } catch (err) {
+    clearTimeout(slow)
+    console.warn('scan fit failed', err)
+    if (toastId !== undefined) toast.dismiss(toastId)
+    editVectorBlock(page, block)
+  } finally {
+    fitting = null
+  }
+}
+
 /** Turns a detected line of existing text into an editable replacement. */
 export function editTextBlock(page: PageItem, block: TextBlock) {
+  if (block.ocr) void editScanBlock(page, block)
+  else editVectorBlock(page, block)
+}
+
+/** Replacement drawn on top: background-coloured cover + new text. */
+function editVectorBlock(page: PageItem, block: TextBlock) {
   const rendered = renderedCanvases.get(page.id)
   let colors = { background: '#ffffff', ink: '#000000' }
   const pad = Math.max(1, block.size * 0.08)

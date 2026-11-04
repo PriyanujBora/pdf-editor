@@ -56,7 +56,10 @@ src/
   features/landing/         drop zone, password dialog
   features/editor/          Editor shell, Viewer (zoom/pinch/virtualization), PageView/PageCanvas,
                             PageOverlay (Konva), InlineTextEditor, Thumbnails, PropertiesPanel, toolbars
-public/fonts/               bundled TTFs (OFL) — Inter, Roboto, Noto Serif, Noto Sans Bengali/Devanagari
+  lib/scan/                 scan-matched edits: fit.ts (fit a scanned line), compose.ts (build the
+                            patch), pixels.ts (raw scan pixels), raster.ts, source.ts (paper/ink model)
+public/fonts/               bundled TTFs — Inter, Roboto, Tinos (Times-metric, Apache-2.0), Noto Serif,
+                            Noto Sans Bengali/Devanagari (OFL)
 ```
 
 ## Data model and coordinates
@@ -114,6 +117,21 @@ public/fonts/               bundled TTFs (OFL) — Inter, Roboto, Noto Serif, No
   Missing glyph → automatic fallback to the bundled `font` (panel explains). Type3, OCR glyph-less and
   non-0.001 font-matrix fonts are never reused. Spaces a font lacks (TeX) become TJ gaps. The inline
   textarea always shows the bundled font while typing.
+- **Scan-matched edits** (`TextElement.scan`, `lib/scan/`): editing an invisible OCR line over a page
+  image draws the new text *into* the scan. Hard-won rules — don't regress them:
+  - Analyse the scan's **own pixels** (`pixels.ts`: decoded image object + its CTM), never a pdf.js
+    render of the page — that resamples and the fit learns blur that isn't there. Regions are snapped to
+    the image pixel grid so the exported patch lines up 1:1.
+  - Fit = font/size/baseline from the OCR text, per-word x offsets (cumulative: justified lines), then
+    quarter-pixel x/y alignment per word, per-word bold by *relative* ink mass.
+  - Appearance: tone is a **histogram-matched** response curve (per-pixel fits average cores with paper →
+    grey haze); blur and stroke weight are chosen by edge steepness + ink mass (pixel error always prefers
+    soft edges). Score and measure only inside the line's band (`lineBand`) — neighbours intrude.
+  - Patch = transparent except erased old words (synthesized paper with real grain) and new strokes.
+    Only changed words are repainted; following words move with their own scanned ink. Never stored:
+    rebuilt from the page + `ScanMatch` + current text, so undo/autosave stay consistent.
+  - Gate: correlation < 0.8, busy paper or faint ink → plain patch (`editVectorBlock`) with a toast.
+  - Export: patch PNG + invisible text (render mode 3) + a Keywords note that scanned text was altered.
 - Edited text is **covered, not erased**: the original glyphs stay in the content stream (copy/search
   still finds them). The UI says so. Real removal = content-stream rewriting (future work).
 

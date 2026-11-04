@@ -7,6 +7,8 @@ export interface ExportRequest {
   sourcePages: SourcePageInfo[]
   elements: EditorElement[]
   assets: Record<string, ImageAsset>
+  /** PNG patch per scan-matched text element id. */
+  scanPatches: Record<string, Uint8Array>
   /** Absolute URL of the app root, for fetching fonts from the worker. */
   baseUrl: string
 }

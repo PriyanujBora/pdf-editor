@@ -48,6 +48,23 @@ await page.waitForSelector('[data-page-id] canvas')
 await page.waitForTimeout(800)
 await page.screenshot({ path: 'tests/out/prod-scanned.png' })
 
+// Scan-matched edit (raw image pixels, patch export) in the production build.
+await page.click('[aria-label="Close file"]')
+await page.setInputFiles('input[type=file]', 'tests/fixtures/scanned-ocr.pdf')
+await page.waitForSelector('[data-page-id] canvas')
+await page.waitForTimeout(1200)
+const sbox = await page.locator('[data-page-id]').first().boundingBox()
+const sz = sbox.width / 612
+await page.mouse.click(sbox.x + 160 * sz, sbox.y + 188 * sz)
+await page.waitForSelector('textarea[aria-label="Edit text"]', { timeout: 15000 })
+await page.keyboard.press('End')
+await page.keyboard.type(' (edited)')
+await page.keyboard.press('Escape')
+await page.waitForTimeout(800)
+const [sdl] = await Promise.all([page.waitForEvent('download'), page.click('[data-testid=download]')])
+await sdl.saveAs('tests/out/prod-scan-export.pdf')
+console.log('scan edit export ok')
+
 // Offline: the service worker serves the app shell.
 await page.evaluate(() => navigator.serviceWorker.ready)
 await page.reload({ waitUntil: 'networkidle' })

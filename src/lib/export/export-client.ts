@@ -3,17 +3,26 @@ import { useSession } from '@/store/session'
 import type { ExportRequest, ExportResponse } from './protocol'
 
 /** Builds the edited PDF in a dedicated worker. Nothing leaves the device. */
-export function exportPdf(onProgress?: (v: number) => void): Promise<Uint8Array> {
+export async function exportPdf(onProgress?: (v: number) => void): Promise<Uint8Array> {
   const s = useSession.getState()
   const d = useDoc.getState()
-  if (!s.bytes) return Promise.reject(new Error('No document open'))
+  if (!s.bytes) throw new Error('No document open')
 
   const pageIds = new Set(d.pages.map((p) => p.id))
   const elements = Object.values(d.elements).filter((el) => pageIds.has(el.pageId))
   const used = new Set(elements.flatMap((el) => (el.kind === 'image' ? [el.assetId] : [])))
   const assets = Object.fromEntries(Object.entries(s.assets).filter(([id]) => used.has(id)))
 
+  // Scan-matched patches are rendered here (they need the page render + canvas).
+  const scanPatches: Record<string, Uint8Array> = {}
+  const scanEls = elements.filter((el) => el.kind === 'text' && el.scan)
+  if (scanEls.length) {
+    const { patchPng, isScanText } = await import('@/lib/scan/compose')
+    for (const el of scanEls) if (el.kind === 'text' && isScanText(el)) scanPatches[el.id] = await patchPng(el)
+  }
+
   const req: ExportRequest = {
+    scanPatches,
     bytes: s.bytes,
     password: s.password,
     pages: d.pages,
