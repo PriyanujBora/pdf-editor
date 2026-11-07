@@ -65,6 +65,36 @@ const [sdl] = await Promise.all([page.waitForEvent('download'), page.click('[dat
 await sdl.saveAs('tests/out/prod-scan-export.pdf')
 console.log('scan edit export ok')
 
+// Encrypted file + an edit + "Keep protection": the production worker re-encrypts with the
+// original passwords (checked with pikepdf when the PDF tools venv exists).
+await page.click('[aria-label="Close file"]')
+await page.setInputFiles('input[type=file]', 'tests/fixtures/encrypted-aes-256.pdf')
+await page.waitForSelector('input[type=password]')
+await page.fill('input[type=password]', 'secret')
+await page.click('button:has-text("Unlock")')
+await page.waitForSelector('[data-page-id] canvas')
+await page.click('[data-tool=text]')
+const ebox = await page.locator('[data-page-id]').first().boundingBox()
+await page.mouse.click(ebox.x + 300, ebox.y + 400)
+await page.keyboard.type('Kept protected')
+await page.keyboard.press('Escape')
+const [edl] = await Promise.all([
+  page.waitForEvent('download'),
+  (async () => {
+    await page.click('[data-testid=download]')
+    await page.click('[data-testid=choice-dialog] button:has-text("Keep protection")')
+  })(),
+])
+await edl.saveAs('tests/out/prod-encrypted.pdf')
+const { existsSync } = await import('node:fs')
+const py = existsSync('tests/.venv/Scripts/python.exe') ? 'tests/.venv/Scripts/python.exe' : 'tests/.venv/bin/python'
+if (existsSync(py)) {
+  const { execFileSync } = await import('node:child_process')
+  const check = `import pikepdf; a=pikepdf.open('tests/out/prod-encrypted.pdf', password='secret'); pikepdf.open('tests/out/prod-encrypted.pdf', password='owner'); print('encrypted', a.is_encrypted, a.encryption.R)`
+  console.log(execFileSync(py, ['-I', '-c', check], { encoding: 'utf8' }).trim())
+}
+console.log('encrypted export ok')
+
 // Offline: the service worker serves the app shell.
 await page.evaluate(() => navigator.serviceWorker.ready)
 await page.reload({ waitUntil: 'networkidle' })

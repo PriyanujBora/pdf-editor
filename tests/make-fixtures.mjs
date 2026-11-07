@@ -15,6 +15,7 @@ import {
   setTextMatrix,
   showText,
   PDFArray,
+  PDFHexString,
   PDFName,
   PDFNumber,
   PDFOperator,
@@ -203,6 +204,131 @@ function wrap(text, font, size, maxW) {
 
 // 5. Corrupt.
 await writeFile(`${OUT}/corrupt.pdf`, Buffer.from('%PDF-1.7\n' + 'garbage '.repeat(500)))
+
+// --- Fidelity fixtures (npm run test:fidelity): document-level features an export must keep ------
+
+/** Four labelled pages with a unique marker each (to prove deleted pages leave the file). */
+async function markedPages(doc, n = 4) {
+  const helv = await doc.embedFont(StandardFonts.Helvetica)
+  const pages = []
+  for (let i = 0; i < n; i++) {
+    const p = doc.addPage([595, 842])
+    p.drawText(`Chapter ${i + 1}`, { x: 72, y: 760, size: 24, font: helv })
+    p.drawText(`Unique marker page-${i + 1}-zq${i}x`, { x: 72, y: 720, size: 12, font: helv })
+    pages.push(p)
+  }
+  return { pages, helv }
+}
+
+// 10. Form: text, multiline, checkbox, radio, dropdown, list, a calculated field (JavaScript).
+{
+  const doc = await PDFDocument.create()
+  const { pages } = await markedPages(doc, 2)
+  const form = doc.getForm()
+  const p = pages[0]
+  const name = form.createTextField('name')
+  name.setText('Ada Lovelace')
+  name.addToPage(p, { x: 72, y: 640, width: 220, height: 22 })
+  const notes = form.createTextField('notes')
+  notes.enableMultiline()
+  notes.setText('First line\nSecond line')
+  notes.addToPage(p, { x: 72, y: 560, width: 220, height: 60 })
+  const agree = form.createCheckBox('agree')
+  agree.addToPage(p, { x: 72, y: 520, width: 16, height: 16 })
+  agree.check()
+  const size = form.createRadioGroup('size')
+  for (const [i, v] of ['S', 'M', 'L'].entries()) size.addOptionToPage(v, p, { x: 72 + i * 40, y: 480, width: 16, height: 16 })
+  size.select('M')
+  const country = form.createDropdown('country')
+  country.addOptions(['India', 'Japan', 'Kenya'])
+  country.select('Japan')
+  country.addToPage(p, { x: 72, y: 430, width: 160, height: 22 })
+  const langs = form.createOptionList('languages')
+  langs.addOptions(['Bengali', 'English', 'Hindi'])
+  langs.select('English')
+  langs.addToPage(p, { x: 72, y: 340, width: 160, height: 70 })
+  const a = form.createTextField('a')
+  a.setText('2')
+  a.addToPage(pages[1], { x: 72, y: 640, width: 80, height: 22 })
+  const b = form.createTextField('b')
+  b.setText('3')
+  b.addToPage(pages[1], { x: 72, y: 600, width: 80, height: 22 })
+  const total = form.createTextField('total')
+  total.setText('5')
+  total.addToPage(pages[1], { x: 72, y: 560, width: 80, height: 22 })
+  const ctx = doc.context
+  const calc = ctx.obj({ S: 'JavaScript', JS: PDFHexString.fromText('AFSimple_Calculate("SUM", new Array ("a", "b"));') })
+  total.acroField.dict.set(PDFName.of('AA'), ctx.obj({ C: calc }))
+  form.acroForm.dict.set(PDFName.of('CO'), ctx.obj([total.acroField.ref]))
+  await writeFile(`${OUT}/form.pdf`, await doc.save())
+}
+
+// 11. Bookmarks: nested outline, named + explicit destinations, an internal link, page labels.
+{
+  const doc = await PDFDocument.create()
+  const { pages } = await markedPages(doc, 4)
+  const ctx = doc.context
+  const dest = (i) => ctx.obj([pages[i].ref, PDFName.of('XYZ'), null, null, null])
+  const outlinesRef = ctx.nextRef()
+  const refs = [ctx.nextRef(), ctx.nextRef(), ctx.nextRef(), ctx.nextRef(), ctx.nextRef()]
+  // Chapter 1 (page 1) › Section 1.1 (page 2, named dest) ; Chapter 2 (page 2) ; Chapter 3 (page 3) › Section 3.1 (page 4)
+  const item = (title, parent, d, extra = {}) => ctx.obj({ Title: PDFHexString.fromText(title), Parent: parent, ...d, ...extra })
+  ctx.assign(refs[0], item('Chapter 1', outlinesRef, { Dest: dest(0) }, { Next: refs[2], First: refs[1], Last: refs[1], Count: 1 }))
+  ctx.assign(refs[1], item('Section 1.1', refs[0], { Dest: PDFHexString.fromText('sec-1-1') }))
+  ctx.assign(refs[2], item('Chapter 2', outlinesRef, { A: ctx.obj({ S: 'GoTo', D: dest(1) }) }, { Prev: refs[0], Next: refs[3] }))
+  ctx.assign(refs[3], item('Chapter 3', outlinesRef, { Dest: dest(2) }, { Prev: refs[2], First: refs[4], Last: refs[4], Count: 1 }))
+  ctx.assign(refs[4], item('Section 3.1', refs[3], { Dest: dest(3) }))
+  ctx.assign(outlinesRef, ctx.obj({ Type: 'Outlines', First: refs[0], Last: refs[3], Count: 6 }))
+  doc.catalog.set(PDFName.of('Outlines'), outlinesRef)
+  doc.catalog.set(PDFName.of('PageMode'), PDFName.of('UseOutlines'))
+  doc.catalog.set(
+    PDFName.of('Names'),
+    ctx.obj({ Dests: ctx.obj({ Names: ctx.obj([PDFHexString.fromText('sec-1-1'), dest(1), PDFHexString.fromText('end'), dest(3)]) }) }),
+  )
+  // Page labels: i, ii, then 1, 2.
+  doc.catalog.set(PDFName.of('PageLabels'), ctx.obj({ Nums: ctx.obj([0, ctx.obj({ S: 'r' }), 2, ctx.obj({ S: 'D' })]) }))
+  // Link on page 1 to the named destination "end" (page 4), and one to page 2.
+  const link = (rect, d) => ctx.register(ctx.obj({ Type: 'Annot', Subtype: 'Link', Rect: rect, Border: [0, 0, 0], Dest: d }))
+  pages[0].node.set(PDFName.of('Annots'), ctx.obj([link([72, 690, 220, 706], PDFHexString.fromText('end')), link([72, 670, 220, 686], dest(1))]))
+  doc.setTitle('Bookmarks fixture')
+  doc.setAuthor('Fixture Author')
+  doc.setSubject('Outline and destinations')
+  await writeFile(`${OUT}/bookmarks.pdf`, await doc.save())
+}
+
+// 12. Attachments.
+{
+  const doc = await PDFDocument.create()
+  await markedPages(doc, 2)
+  await doc.attach(Buffer.from('hello attachment'), 'notes.txt', { mimeType: 'text/plain', description: 'Notes', creationDate: new Date(0), modificationDate: new Date(0) })
+  await doc.attach(Buffer.from('a,b\n1,2\n'), 'data.csv', { mimeType: 'text/csv' })
+  await writeFile(`${OUT}/attachments.pdf`, await doc.save())
+}
+
+// 13. Encrypted with restricted permissions, one per cipher (user "secret", owner "owner").
+for (const algorithm of ['RC4-128', 'AES-128', 'AES-256']) {
+  const doc = await PDFDocument.create()
+  await markedPages(doc, 3)
+  doc.setTitle(`Encrypted ${algorithm}`)
+  doc.encrypt({
+    userPassword: 'secret',
+    ownerPassword: 'owner',
+    algorithm,
+    allowWeakCryptography: true,
+    permissions: { printing: 'lowResolution', modifying: false, copying: false, annotating: true, fillingForms: true },
+  })
+  await writeFile(`${OUT}/encrypted-${algorithm.toLowerCase()}.pdf`, await doc.save())
+}
+
+// 14. Tagged PDF with an outline (Chrome: tagged + document outline from headings).
+{
+  const browser = await chromium.launch()
+  const page = await browser.newPage()
+  await page.setContent(`<!doctype html><html lang="en"><meta charset=utf-8><style>body{font:12pt Arial;margin:48px} h1,h2{break-before:page} h1:first-of-type{break-before:auto}</style>
+    ${[1, 2, 3].map((i) => `<h1>Part ${i}</h1><p>Unique marker page-${i}-tg${i}x. ${LOREM}</p><h2>Part ${i}.1</h2><p>${LOREM}</p>`).join('')}`)
+  await writeFile(`${OUT}/tagged.pdf`, await page.pdf({ format: 'A4', tagged: true, outline: true }))
+  await browser.close()
+}
 
 // --- Producer imitations for the edit-stability harness (tests/edit-stability.mjs) ---------------
 // File names start with the producer they imitate: the harness reports pass rates per producer.

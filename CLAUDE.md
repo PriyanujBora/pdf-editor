@@ -28,6 +28,7 @@ npm run typecheck | lint | format
 npm run fixtures       # generate tests/fixtures/*.pdf (text-heavy, multi-page, scanned, encrypted, corrupt)
 npm run test:e2e       # Playwright suite at 390/820/1440px against E2E_URL (default http://localhost:5199/)
 npm run test:prod      # smoke test of the built app under wrangler dev (CSP, export, offline)
+npm run test:fidelity  # export keeps forms/outlines/tags/attachments/labels/encryption (dev server + tests/.venv)
 npm run test:edit-stability [-- filter]  # every editable line of fixtures + tests/corpus: no-op, editing,
                        # same-length word, missing glyph, size (needs dev server + tests/.venv, see tests/tools)
 npm run corpus:word    # real Word "Save as PDF" output into tests/corpus (Windows + Word only)
@@ -99,8 +100,12 @@ public/fonts/               bundled TTFs — Inter, Roboto, Tinos (Times-metric,
 
 ## Export pipeline (worker)
 
-1. Load source with pdf-lib (`password` when encrypted; owner-only files use `''`).
-2. `copyPages` into a fresh document in output order; set `/Rotate`.
+0. No edits, same pages in the same order → the **original bytes** are downloaded (perfect fidelity,
+   protection included) unless the user chose to remove protection (`isUnchanged` in export-client).
+1. Load the source with pdf-lib and **edit it in place** (`password` when encrypted; owner-only files use
+   `''`; `updateMetadata: false`, `preserveXFA: true`). Never copy pages into a new document — that drops
+   forms, outlines, named dests, page labels, tags, XMP, attachments, viewer prefs.
+2. Pages that get drawn on receive a private copy of their Resources (`privateResources`); `/Rotate` set.
 3. Per element: `q`, `cm` = (page space → PDF space) · (element frame), draw, `Q`.
    Covers are drawn first, then elements in insertion order.
 4. Text is shaped with fontkit (`font.layout`) and drawn **glyph by glyph** with `Tm` so GPOS offsets
@@ -108,7 +113,12 @@ public/fonts/               bundled TTFs — Inter, Roboto, Tinos (Times-metric,
    `encodeGlyph`). Italic on a face without italics = synthetic oblique (shear 0.2), like browsers.
    Edited printed lines (`drawSourceLine`): same layout as the editor; original glyphs reuse the font
    dictionary (incl. non-embedded and Type3, for moved glyphs) with the same codes, stand-ins are embedded.
-5. `save({ useObjectStreams: true })`, validated against Chrome's PDFium + pypdf strict during dev.
+5. `rebuildPageTree` (one flat /Pages in output order, inheritable attributes pushed to leaves),
+   `pruneDeletedPages` (outline items, named dests, links, tags + ParentTree, form fields, OpenAction;
+   page labels rewritten per surviving page), `flush()`, `collectGarbage`, then optional
+   `applySourceEncryption` (keep protection) — all in `lib/export/doc-structure.ts` / `keep-encryption.ts`.
+6. `save({ useObjectStreams: true, updateFieldAppearances: false })`. `npm run test:fidelity` checks it all
+   (pikepdf/pypdf/PDFium/Ghostscript), including both passwords and the permissions.
 
 ## Gotchas
 
@@ -185,6 +195,17 @@ public/fonts/               bundled TTFs — Inter, Roboto, Tinos (Times-metric,
     rebuilt from the page + `ScanMatch` + current text, so undo/autosave stay consistent.
   - Gate: correlation < 0.8, busy paper or faint ink → plain patch (`editVectorBlock`) with a toast.
   - Export: patch PNG + invisible text (render mode 3) + a Keywords note that scanned text was altered.
+- **pdf-lib in-place export traps:** `removePage()` deletes the page object (rebuild the page tree
+  instead); `normalize()` assigns *inherited* Resources by reference (copy before adding fonts);
+  `save()` writes unreachable objects (garbage-collect, or deleted pages and replaced streams stay in the
+  file); `updateFieldAppearances` defaults to true and would redraw every field in Helvetica; the
+  decrypting parse loses the trailer's /Info pointer (restored from an undecrypted probe).
+- **Keeping encryption:** pdf-lib can only create new encryption. We reuse the source's /Encrypt dict, /ID
+  and file key (pdf-lib's `CipherTransformFactory`, reached via the `@cantoo/pdf-lib/crypto` Vite alias,
+  plus a PDFSecurity whose key/version are replaced). The writer encrypts stream data only and keeps the
+  catalog, page dicts and stream dicts out of object streams, so their strings are encrypted by us.
+- Glyph capture uses `getOperatorList({ annotationMode: DISABLE })`: annotation appearances (form values,
+  stamps) are not page text.
 - Edited text is **covered, not erased** (until Phase 3, see PLAN.md): changed/moved words get a patch in
   the sampled page colour; the original glyphs stay in the content stream (copy/search still finds them).
   The panel says so.

@@ -309,7 +309,32 @@ await test('desktop: encrypted PDF asks for password', DESKTOP, async (page) => 
   await page.fill('input[type=password]', 'secret')
   await page.click('button:has-text("Unlock")')
   await page.waitForSelector('[data-page-id] canvas')
-  await download(page, 'encrypted-export.pdf')
+  // Downloading asks whether to keep the protection; "Keep" (the default) re-encrypts.
+  const [dl] = await Promise.all([
+    page.waitForEvent('download', { timeout: 60000 }),
+    (async () => {
+      await page.click('[data-testid=download]')
+      await page.waitForSelector('[data-testid=choice-dialog] >> text=Keep the password protection?')
+      await page.click('[data-testid=choice-dialog] button:has-text("Keep protection")')
+    })(),
+  ])
+  await dl.saveAs(`${OUT}/encrypted-export.pdf`)
+  // No changes + keep protection = the original file, byte for byte.
+  const { readFile } = await import('node:fs/promises')
+  assert.ok((await readFile(`${OUT}/encrypted-export.pdf`)).equals(await readFile(`${FIX}/encrypted.pdf`)), 'original bytes')
+})
+
+await test('desktop: deleting a bookmarked page asks first', DESKTOP, async (page) => {
+  await open(page, 'bookmarks.pdf')
+  await page.click('[aria-label="Delete page 3"]')
+  await page.waitForSelector('[data-testid=choice-dialog] >> text=Delete page 3?')
+  assert.match(await page.textContent('[data-testid=choice-dialog]'), /Chapter 3/)
+  await page.click('[data-testid=choice-dialog] button:has-text("Cancel")')
+  assert.equal(await state(page, () => window.__doc.getState().pages.length), 4, 'cancel keeps the page')
+  await page.click('[aria-label="Delete page 3"]')
+  await page.click('[data-testid=choice-dialog] button:has-text("Delete page")')
+  assert.equal(await state(page, () => window.__doc.getState().pages.length), 3, 'deleted after confirming')
+  // A page without bookmarks is deleted straight away (page 4 of the original is now page 3: it has one).
 })
 
 await test('desktop: corrupt PDF shows a friendly error', DESKTOP, async (page) => {
