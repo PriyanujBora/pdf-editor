@@ -55,6 +55,35 @@ export const FONT_FAMILIES: Record<FontFamilyId, FontFamilyDef> = {
     ascent: 0.896,
     descent: 0.408,
   },
+  // Metric-compatible stand-ins (same advance widths as the originals; see PLAN.md §8).
+  arimo: { id: 'arimo', label: 'Arimo (Arial)', css: 'PDF Arimo', file: 'Arimo', hasItalic: true, ascent: 0.9053, descent: 0.2119 },
+  carlito: {
+    id: 'carlito',
+    label: 'Carlito (Calibri)',
+    css: 'PDF Carlito',
+    file: 'Carlito',
+    hasItalic: true,
+    ascent: 0.9521,
+    descent: 0.2686,
+  },
+  cousine: {
+    id: 'cousine',
+    label: 'Cousine (Courier)',
+    css: 'PDF Cousine',
+    file: 'Cousine',
+    hasItalic: true,
+    ascent: 0.8325,
+    descent: 0.3003,
+  },
+  gelasio: {
+    id: 'gelasio',
+    label: 'Gelasio (Georgia)',
+    css: 'PDF Gelasio',
+    file: 'Gelasio',
+    hasItalic: true,
+    ascent: 0.9277,
+    descent: 0.3418,
+  },
 }
 
 export const FONT_LIST = Object.values(FONT_FAMILIES)

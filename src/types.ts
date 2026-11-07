@@ -32,7 +32,17 @@ export interface PageItem {
   rotation: Rotation
 }
 
-export type FontFamilyId = 'inter' | 'roboto' | 'tinos' | 'noto-serif' | 'noto-bengali' | 'noto-devanagari'
+export type FontFamilyId =
+  | 'inter'
+  | 'roboto'
+  | 'tinos'
+  | 'noto-serif'
+  | 'noto-bengali'
+  | 'noto-devanagari'
+  | 'arimo'
+  | 'carlito'
+  | 'cousine'
+  | 'gelasio'
 export type TextAlign = 'left' | 'center' | 'right'
 
 interface BaseElement {
@@ -102,6 +112,84 @@ export interface Cover {
   original: string
 }
 
+/**
+ * A style run of an existing line, as the PDF drew it (captured from the pdf.js operator list).
+ * Lengths are page-space points.
+ */
+export interface SourceRun {
+  /** pdf.js font id in this session (its FontFace, when `embedded`). */
+  loadedName: string
+  /** /BaseFont, used by the export to find the font dictionary again. */
+  baseFont: string
+  /** Type0 with 2-byte codes / Type3 (glyph procedures, no FontFace). */
+  composite: boolean
+  type3: boolean
+  /** The font program is in the file (pdf.js registered a FontFace for it). */
+  embedded: boolean
+  /** Font size (vertical scale) and the horizontal scale of glyph shapes (Tz, stretched matrices). */
+  size: number
+  hScale: number
+  /** Glyph space → em (0.001 for all but Type3). */
+  fontMatrix: number
+  /** Tc and Tw. */
+  charSpacing: number
+  wordSpacing: number
+  /** Baseline shift (Ts or a raised superscript), + = up. */
+  rise: number
+  color: string
+  /** Fill opacity as printed; flattened into `color` against the page background when editing starts. */
+  alpha?: number
+  bold: boolean
+  italic: boolean
+  /** Type3 fonts often have no /BaseFont: a few (char code, width) pairs identify the font dictionary. */
+  widthSig?: [number, number][]
+  /** Bundled, metric-compatible family for characters this font can't draw, and its scale. */
+  family: FontFamilyId
+  familyScale: number
+}
+
+/** One glyph of an existing line. */
+export interface SourceGlyph {
+  /** The characters it stands for (two or three for ligatures). */
+  uni: string
+  /** Origin x (page space) and advance, spacing included. */
+  x: number
+  adv: number
+  run: number
+  /** Char code in its font, and pdf.js' char for drawing with the font's FontFace. */
+  code: number
+  fontChar: string
+  /** Advance width in glyph units (× run.fontMatrix → em), spacing excluded. */
+  w: number
+}
+
+/** An existing line of text as printed: what an edit is compared against. */
+export interface SourceLine {
+  /** Text as printed; spaces the PDF didn't draw are inferred from gaps. */
+  text: string
+  /** Glyph index for every character of `text` (-1 = inferred space). */
+  charGlyph: number[]
+  glyphs: SourceGlyph[]
+  runs: SourceRun[]
+  /** Baseline (page space, without rise) and the line's ink box. */
+  baseline: number
+  box: PtRect
+  /** Width of a space on this line (measured word gap when the font has no space glyph). */
+  spaceWidth: number
+  /** Word gaps were stretched to fill the column: edits keep the right edge. */
+  justified: boolean
+  /**
+   * Vertical extent of patches (page space). The line box uses the font's full ascent/descent, which
+   * in tightly set paragraphs overlaps the neighbouring lines; patches stop half-way into that overlap.
+   */
+  coverTop?: number
+  coverBottom?: number
+  /** Sampled page colour behind the line, for patches over changed words. */
+  background: string
+  /** Glyphs each font has drawn in this document (keyed by /BaseFont), for typing new text. */
+  fonts: Record<string, OriginalFont>
+}
+
 export interface TextElement extends BaseElement {
   kind: 'text'
   text: string
@@ -126,6 +214,15 @@ export interface TextElement extends BaseElement {
   useOriginal?: boolean
   /** Edit on a scanned page, drawn into the scan instead of on top of it. */
   scan?: ScanMatch
+  /**
+   * Edit of an existing vector line. `text` is compared with `source.text`: unchanged words keep
+   * the PDF's own glyphs and positions, changed words are laid out fresh in the style of the text
+   * they replace (see lib/text/line-layout.ts). `x`/`y` start at `source.box`; moving the element
+   * moves the whole line.
+   */
+  source?: SourceLine
+  /** Set once the user restyles the line: every word is then drawn with the fields above. */
+  override?: boolean
 }
 
 export interface ImageElement extends BaseElement {

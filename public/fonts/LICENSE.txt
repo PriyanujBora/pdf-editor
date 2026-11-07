@@ -2,4 +2,9 @@ Inter, Roboto, Noto Serif, Noto Sans Bengali and Noto Sans Devanagari are licens
 SIL Open Font License, Version 1.1 — https://openfontlicense.org
 Tinos (metric-compatible with Times New Roman) is licensed under the Apache License, Version 2.0 —
 https://www.apache.org/licenses/LICENSE-2.0
-All were downloaded from Google Fonts by scripts/fetch-fonts.mjs.
+All of the above were downloaded from Google Fonts by scripts/fetch-fonts.mjs.
+
+Arimo (Arial/Helvetica metrics), Carlito (Calibri metrics), Cousine (Courier metrics) and Gelasio
+(Georgia metrics) are licensed under the SIL Open Font License, Version 1.1. They come from
+github.com/google/fonts (ofl/…) and were instanced, unhinted and subset to Latin by
+scripts/build-fallback-fonts.py; advance widths are unchanged.
