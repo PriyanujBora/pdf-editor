@@ -48,7 +48,16 @@ export default defineConfig({
       devOptions: { enabled: false },
     }),
   ],
-  resolve: { alias: { '@': path.resolve(import.meta.dirname, './src') } },
+  resolve: {
+    alias: [
+      { find: '@', replacement: path.resolve(import.meta.dirname, './src') },
+      // pdf-lib's key derivation, needed to keep a PDF's original encryption (see keep-encryption.ts).
+      {
+        find: /^@cantoo\/pdf-lib\/crypto$/,
+        replacement: path.resolve(import.meta.dirname, './node_modules/@cantoo/pdf-lib/es/core/crypto.js'),
+      },
+    ],
+  },
   worker: { format: 'es' },
   // Pre-bundle everything up front so the dev server never reloads mid-session
   // when a lazily-imported dependency is first seen.

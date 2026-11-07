@@ -32,7 +32,9 @@ import { encodeLine, usesOriginal, type OriginalFont } from '@/lib/original-font
 import { alignOffset, baselineOffset, splitLines } from '@/lib/text-layout'
 import { layoutLine, type Measure } from '@/lib/text/line-layout'
 import type { Cover, FontFamilyId, ImageElement, TextElement } from '@/types'
+import { collectGarbage, privateResources, pruneDeletedPages, rebuildPageTree } from './doc-structure'
 import { compatFontkit } from './fontkit-compat'
+import { applySourceEncryption, readEncryption } from './keep-encryption'
 import { elementFrame, invert, mul, pdfToPage, type Mat } from './matrix'
 import type { ExportRequest, ExportResponse } from './protocol'
 
@@ -49,45 +51,56 @@ self.onmessage = async (e: MessageEvent<ExportRequest>) => {
 
 const progress = (value: number) => self.postMessage({ type: 'progress', value } satisfies ExportResponse)
 
-async function loadSource(bytes: Uint8Array, password: string) {
-  const probe = await PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false })
-  if (!probe.isEncrypted) return probe
-  // Owner-password-only files open with the empty user password.
-  return PDFDocument.load(bytes, { password, updateMetadata: false })
-}
-
 async function buildPdf(req: ExportRequest): Promise<Uint8Array> {
-  const src = await loadSource(req.bytes, req.password)
-  const out = await PDFDocument.create()
-  out.registerFontkit(compatFontkit)
-
-  const title = src.getTitle()
-  if (title) out.setTitle(title)
-  out.setProducer('Free PDF Editor (pdf-lib)')
-  out.setCreator('Free PDF Editor')
+  // Edit the source document itself (not copies of its pages in a new one) so forms, outlines,
+  // named destinations, page labels, tags, metadata and attachments survive.
+  const enc = req.keepEncryption ? await readEncryption(req.bytes, req.password) : null
+  if (enc && !enc.supported) throw new Error('This file uses a kind of password protection that can’t be kept. Choose “Remove protection” to download it.')
+  const doc = await PDFDocument.load(req.bytes, {
+    password: req.password,
+    ignoreEncryption: false,
+    updateMetadata: false,
+    preserveXFA: true,
+  }).catch(async (err) => {
+    // Unencrypted files: pdf-lib refuses a password argument it doesn't need on some files.
+    if (/encrypt/i.test(String(err))) throw err
+    return PDFDocument.load(req.bytes, { updateMetadata: false, preserveXFA: true })
+  })
+  doc.registerFontkit(compatFontkit)
+  // pdf-lib's decrypting parse loses the trailer's /Info pointer (xref-stream trailers): restore it.
+  if (!doc.context.trailerInfo.Info) {
+    const probe = enc?.probe ?? (await PDFDocument.load(req.bytes, { ignoreEncryption: true, updateMetadata: false }))
+    const info = probe.context.trailerInfo.Info
+    if (info instanceof PDFRef && doc.context.lookup(info) instanceof PDFDict) doc.context.trailerInfo.Info = info
+  }
   // Scan-matched edits are hard to spot by eye; say so in the metadata.
-  if (req.elements.some((el) => el.kind === 'text' && el.scan))
-    out.setKeywords(['Edited with Free PDF Editor: text on scanned pages was altered'])
+  if (req.elements.some((el) => el.kind === 'text' && el.scan)) {
+    const prev = doc.getKeywords()
+    const note = 'Edited with Free PDF Editor: text on scanned pages was altered'
+    if (!prev?.includes(note)) doc.setKeywords([...(prev ? [prev] : []), note])
+  }
 
-  const copied = await out.copyPages(
-    src,
-    req.pages.map((p) => p.srcIndex),
-  )
+  const pages = doc.getPages()
+  const order = req.pages.map((p) => p.srcIndex)
   progress(0.15)
 
-  const fonts = new FontCache(out, req.baseUrl)
-  const originals = new OriginalFonts(out)
+  const fonts = new FontCache(doc, req.baseUrl)
+  const originals = new OriginalFonts(doc)
   const images = new Map<string, PDFImage>()
 
   for (let i = 0; i < req.pages.length; i++) {
     const item = req.pages[i]
     const info = req.sourcePages[item.srcIndex]
-    const page = out.addPage(copied[i])
-    page.setRotation(degrees((info.rotate + item.rotation) % 360))
+    const page = pages[item.srcIndex]
+    const els = req.elements.filter((el) => el.pageId === item.id)
+    if ((info.rotate + item.rotation) % 360 !== ((page.getRotation().angle % 360) + 360) % 360)
+      page.setRotation(degrees((info.rotate + item.rotation) % 360))
+    if (!els.length) continue
+    // Never add to a Resources dictionary other pages share.
+    privateResources(doc, page)
 
     // page space → PDF user space
     const toPdf = invert(pdfToPage(info.view, info.rotate))
-    const els = req.elements.filter((el) => el.pageId === item.id)
 
     // Covers first so no replacement text is hidden by another cover.
     // Scan-matched edits are part of the page image: draw them first, with an
@@ -96,7 +109,7 @@ async function buildPdf(req: ExportRequest): Promise<Uint8Array> {
       if (el.kind !== 'text' || !el.scan) continue
       const png = req.scanPatches[el.id]
       if (png) {
-        const img = await out.embedPng(png)
+        const img = await doc.embedPng(png)
         const r = el.scan.region
         withFrame(page, mul(toPdf, elementFrame(r.x, r.y, 0)), () =>
           page.drawImage(img, { x: 0, y: -r.height, width: r.width, height: r.height }),
@@ -115,12 +128,21 @@ async function buildPdf(req: ExportRequest): Promise<Uint8Array> {
       }
       if (el.kind === 'text') {
         if (!drawOriginalText(page, toPdf, el, originals)) await drawText(page, toPdf, el, fonts)
-      } else await drawImage(page, toPdf, el, req, images, out)
+      } else await drawImage(page, toPdf, el, req, images, doc)
     }
-    progress(0.15 + (0.7 * (i + 1)) / req.pages.length)
+    progress(0.15 + (0.6 * (i + 1)) / req.pages.length)
   }
 
-  const bytes = await out.save({ useObjectStreams: true })
+  // Page order, deleted pages and everything that pointed at them; then drop unreachable objects
+  // (deleted pages, replaced streams, superseded revisions) so they don't ship in the file.
+  rebuildPageTree(doc, pages, order)
+  pruneDeletedPages(doc, pages, order)
+  await doc.flush()
+  collectGarbage(doc.context)
+  if (enc) applySourceEncryption(doc, enc)
+  progress(0.85)
+
+  const bytes = await doc.save({ useObjectStreams: true, updateFieldAppearances: false, addDefaultPage: false })
   progress(1)
   return bytes
 }

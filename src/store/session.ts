@@ -12,6 +12,10 @@ interface SessionState {
   bytes: Uint8Array | null
   /** Password used to open the file ('' when none). */
   password: string
+  /** The file is password-protected (an open password, or only an owner password). */
+  encrypted: boolean
+  /** Bookmark titles that point at each source page (index → titles). */
+  bookmarks: Record<number, string[]>
   pdf: PDFDocumentProxy | null
   sourcePages: SourcePageInfo[]
   assets: Record<string, ImageAsset>
@@ -27,6 +31,8 @@ export const useSession = create<SessionState>()((set, get) => ({
   fileName: '',
   bytes: null,
   password: '',
+  encrypted: false,
+  bookmarks: {},
   pdf: null,
   sourcePages: [],
   assets: {},
@@ -35,6 +41,6 @@ export const useSession = create<SessionState>()((set, get) => ({
   addAsset: (a) => set((s) => ({ assets: { ...s.assets, [a.id]: a } })),
   close: () => {
     void get().pdf?.loadingTask.destroy()
-    set({ status: 'empty', progress: 0, fileName: '', bytes: null, password: '', pdf: null, sourcePages: [], assets: {} })
+    set({ status: 'empty', progress: 0, fileName: '', bytes: null, password: '', encrypted: false, bookmarks: {}, pdf: null, sourcePages: [], assets: {} })
   },
 }))

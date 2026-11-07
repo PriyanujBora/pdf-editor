@@ -81,8 +81,12 @@ export async function openDocument(bytes: Uint8Array, fileName: string, opts: Op
       import('@/lib/scan/compose').then((m) => m.clearScanCaches()),
       import('@/lib/scan/pixels').then((m) => m.clearPixelCache()),
     ])
+    const encrypted = !!opts.password || (await pdf.getPermissions().catch(() => null)) !== null
+    const bookmarks = await bookmarksByPage(pdf).catch(() => ({}))
     useSession.getState().set({
       status: 'ready',
+      encrypted,
+      bookmarks,
       progress: 1,
       fileName,
       bytes,
@@ -101,6 +105,29 @@ export async function openDocument(bytes: Uint8Array, fileName: string, opts: Op
     if (err instanceof OpenFailure) throw err
     throw new OpenFailure(classifyError(err))
   }
+}
+
+/** Bookmark titles per page they point to (pdf.js outline + destinations). */
+async function bookmarksByPage(pdf: Awaited<ReturnType<Awaited<ReturnType<typeof loadPdfJs>>['getDocument']>['promise']>) {
+  const out: Record<number, string[]> = {}
+  const outline = await pdf.getOutline()
+  const walk = async (items: typeof outline | null) => {
+    for (const it of items ?? []) {
+      try {
+        const dest = typeof it.dest === 'string' ? await pdf.getDestination(it.dest) : it.dest
+        const ref = Array.isArray(dest) ? dest[0] : null
+        if (ref && typeof ref === 'object') {
+          const i = await pdf.getPageIndex(ref as { num: number; gen: number })
+          ;(out[i] ??= []).push(it.title)
+        }
+      } catch {
+        /* unresolvable destination */
+      }
+      await walk(it.items)
+    }
+  }
+  await walk(outline)
+  return out
 }
 
 export async function openFile(file: File, password?: string) {

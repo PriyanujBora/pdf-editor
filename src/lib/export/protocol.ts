@@ -3,6 +3,8 @@ import type { EditorElement, ImageAsset, PageItem, SourcePageInfo } from '@/type
 export interface ExportRequest {
   bytes: Uint8Array
   password: string
+  /** Encrypted source: re-encrypt the output with the original passwords and permissions. */
+  keepEncryption: boolean
   pages: PageItem[]
   sourcePages: SourcePageInfo[]
   elements: EditorElement[]

@@ -2,11 +2,30 @@ import { useDoc } from '@/store/document'
 import { useSession } from '@/store/session'
 import type { ExportRequest, ExportResponse } from './protocol'
 
-/** Builds the edited PDF in a dedicated worker. Nothing leaves the device. */
-export async function exportPdf(onProgress?: (v: number) => void): Promise<Uint8Array> {
+/** True when the download would be the original file: no edits, same pages in the same order. */
+export function isUnchanged() {
+  const s = useSession.getState()
+  const d = useDoc.getState()
+  const pageIds = new Set(d.pages.map((p) => p.id))
+  const hasEdits = Object.values(d.elements).some((el) => pageIds.has(el.pageId))
+  const samePages = d.pages.length === s.sourcePages.length && d.pages.every((p, i) => p.srcIndex === i && p.rotation === 0)
+  return !hasEdits && samePages
+}
+
+/**
+ * Builds the edited PDF in a dedicated worker. Nothing leaves the device.
+ * With no changes at all the original bytes are returned untouched (perfect fidelity, protection
+ * included) — unless the user chose to remove the password protection.
+ */
+export async function exportPdf(onProgress?: (v: number) => void, opts: { keepEncryption?: boolean; forceRebuild?: boolean } = {}): Promise<Uint8Array> {
   const s = useSession.getState()
   const d = useDoc.getState()
   if (!s.bytes) throw new Error('No document open')
+  const keepEncryption = s.encrypted && opts.keepEncryption !== false
+  if (isUnchanged() && (keepEncryption || !s.encrypted) && !opts.forceRebuild && !(import.meta.env.DEV && (window as { __forceRebuild?: boolean }).__forceRebuild)) {
+    onProgress?.(1)
+    return s.bytes.slice()
+  }
 
   const pageIds = new Set(d.pages.map((p) => p.id))
   const elements = Object.values(d.elements).filter((el) => pageIds.has(el.pageId))
@@ -25,6 +44,7 @@ export async function exportPdf(onProgress?: (v: number) => void): Promise<Uint8
     scanPatches,
     bytes: s.bytes,
     password: s.password,
+    keepEncryption,
     pages: d.pages,
     sourcePages: s.sourcePages,
     elements,
