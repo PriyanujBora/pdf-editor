@@ -16,7 +16,9 @@
     "fixtures": "node tests/make-fixtures.mjs",
     "cf:dev": "npm run build && wrangler dev",
     "format": "prettier --write src tests scripts",
-    "test:prod": "node tests/prod-smoke.mjs"
+    "test:prod": "node tests/prod-smoke.mjs",
+    "test:edit-stability": "node tests/edit-stability.mjs",
+    "corpus:word": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/corpus-word.ps1"
   },
   "dependencies": {
     "@cantoo/pdf-lib": "^2.11.1",

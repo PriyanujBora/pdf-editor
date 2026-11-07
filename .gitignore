@@ -31,3 +31,8 @@ tests/out
 .wrangler
 dev-dist
 tests/.smoke.mjs
+
+# edit-stability harness: private corpus (README is committed) and the PDF tools venv
+tests/corpus/*
+!tests/corpus/README.md
+tests/.venv

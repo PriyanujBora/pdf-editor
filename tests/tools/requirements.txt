@@ -1,0 +1,7 @@
+pypdf==6.21.4
+pypdfium2==5.14.0
+pikepdf==10.17.0
+cryptography
+fonttools
+numpy
+pillow
