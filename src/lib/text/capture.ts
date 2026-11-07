@@ -97,8 +97,9 @@ function toColor(arg: unknown): string | null {
 }
 
 export async function captureGlyphs(page: PDFPageProxy): Promise<{ glyphs: CapturedGlyph[]; fonts: Map<string, CapturedFont> }> {
-  const { OPS } = await loadPdfJs()
-  const ops = await page.getOperatorList()
+  const { OPS, AnnotationMode } = await loadPdfJs()
+  // Page content only: annotation appearances (form field values, stamps) are not page text.
+  const ops = await page.getOperatorList({ annotationMode: AnnotationMode.DISABLE })
   const vp = page.getViewport({ scale: 1 })
   const fonts = new Map<string, CapturedFont>()
   const glyphs: CapturedGlyph[] = []

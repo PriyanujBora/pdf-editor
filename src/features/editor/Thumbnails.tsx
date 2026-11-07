@@ -19,6 +19,7 @@ import { undo, useDoc } from '@/store/document'
 import { useSession } from '@/store/session'
 import { useUi } from '@/store/ui'
 import type { PageItem } from '@/types'
+import { choose } from './choice'
 import { viewerBridge } from './viewer-bridge'
 
 const THUMB_W = 132
@@ -125,7 +126,26 @@ function SortableThumb({
             type="button"
             disabled={!canDelete}
             className="grid size-11 place-items-center rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-30 lg:size-8"
-            onClick={() => {
+            onClick={async () => {
+              // Bookmarks that lead to this page disappear with it: say so first.
+              const marks = useSession.getState().bookmarks[page.srcIndex] ?? []
+              if (marks.length) {
+                const shown = marks.slice(0, 3).map((t) => `“${t}”`).join(', ') + (marks.length > 3 ? ` and ${marks.length - 3} more` : '')
+                const ok = await choose({
+                  title: `Delete page ${index + 1}?`,
+                  description: (
+                    <>
+                      This page has {marks.length === 1 ? 'a bookmark' : `${marks.length} bookmarks`} ({shown}). Deleting the
+                      page removes {marks.length === 1 ? 'it' : 'them'} from the downloaded PDF.
+                    </>
+                  ),
+                  options: [
+                    { value: 'delete', label: 'Delete page', variant: 'destructive' },
+                    { value: 'cancel', label: 'Cancel', variant: 'outline' },
+                  ],
+                })
+                if (ok !== 'delete') return
+              }
               useDoc.getState().removePage(page.id)
               toast(`Page ${index + 1} deleted`, { action: { label: 'Undo', onClick: () => undo() } })
             }}

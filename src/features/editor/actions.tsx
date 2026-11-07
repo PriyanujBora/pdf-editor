@@ -1,4 +1,6 @@
+import { LockKeyhole } from 'lucide-react'
 import { toast } from 'sonner'
+import { choose } from './choice'
 import { downloadBytes, editedFileName, exportPdf } from '@/lib/export/export-client'
 import { ImageError, ingestImage } from '@/lib/images'
 import { uid } from '@/lib/ids'
@@ -336,9 +338,32 @@ export async function downloadPdf() {
   if (exporting) return
   exporting = true
   useUi.getState().set({ editingId: null })
+  // Password-protected input: the user decides whether the download stays protected.
+  let keepEncryption = true
+  if (useSession.getState().encrypted) {
+    const pick = await choose({
+      title: 'Keep the password protection?',
+      icon: <LockKeyhole className="size-5" />,
+      description: (
+        <>
+          The original is password-protected. Keeping protection saves your download with the same passwords and
+          permissions. Your password is only used on this device and never stored.
+        </>
+      ),
+      options: [
+        { value: 'keep', label: 'Keep protection' },
+        { value: 'remove', label: 'Remove protection', variant: 'outline' },
+      ],
+    })
+    if (!pick) {
+      exporting = false
+      return
+    }
+    keepEncryption = pick === 'keep'
+  }
   const id = toast.loading('Preparing your PDF…')
   try {
-    const bytes = await exportPdf((v) => toast.loading(`Preparing your PDF… ${Math.round(v * 100)}%`, { id }))
+    const bytes = await exportPdf((v) => toast.loading(`Preparing your PDF… ${Math.round(v * 100)}%`, { id }), { keepEncryption })
     downloadBytes(bytes, editedFileName(useSession.getState().fileName))
     toast.success('Downloaded', { id, duration: 2500 })
   } catch (err) {

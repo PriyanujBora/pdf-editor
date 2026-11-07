@@ -146,7 +146,13 @@ async function detect(page: PDFPageProxy): Promise<TextBlock[]> {
     console.warn('glyph capture failed, using text items', err)
   }
   const items = await detectFromItems(page, vector !== null)
-  return [...(vector ?? []), ...items]
+  // Ids must be unique (React keys, hit areas): lines can start at the same point.
+  const seen = new Map<string, number>()
+  return [...(vector ?? []), ...items].map((blk) => {
+    const n = seen.get(blk.id) ?? 0
+    seen.set(blk.id, n + 1)
+    return n ? { ...blk, id: `${blk.id}#${n}` } : blk
+  })
 }
 
 async function detectFromItems(page: PDFPageProxy, ocrOnly: boolean): Promise<TextBlock[]> {
