@@ -3,6 +3,8 @@ import type { TextItem } from 'pdfjs-dist/types/src/display/api'
 import { familyForText } from '@/lib/fonts'
 import { missingGlyphs, type OriginalFont } from '@/lib/original-font'
 import { isInvisibleFont, originalFontFor, scanPageFonts } from './font-scan'
+import { captureGlyphs } from '@/lib/text/capture'
+import { buildLines, type CapturedLine } from '@/lib/text/lines'
 import type { FontFamilyId } from '@/types'
 
 /** A detected line of existing text, in page space. */
@@ -23,6 +25,8 @@ export interface TextBlock {
   original?: OriginalFont
   /** Invisible OCR text over a scanned image: edit by matching the scan. */
   ocr: boolean
+  /** Vector text: every glyph as printed, so edits can keep unchanged words exactly. */
+  source?: CapturedLine
 }
 
 interface Piece {
@@ -114,7 +118,38 @@ function mapFont(info: FontInfo, cssFamily: string | undefined): { font: FontFam
 /** Text tilted less than this (≈ 2°) counts as horizontal — OCR layers are rarely perfectly level. */
 const MAX_SKEW = 0.035
 
+/**
+ * Visible vector text comes from the glyph capture (exact positions, fonts, colours, spacing).
+ * Invisible OCR layers over scans keep the pdf.js text-item path below, which scan matching is
+ * tuned on. If the capture fails, every line falls back to that path.
+ */
 async function detect(page: PDFPageProxy): Promise<TextBlock[]> {
+  let vector: TextBlock[] | null = null
+  try {
+    const { glyphs, fonts } = await captureGlyphs(page)
+    vector = buildLines(glyphs, fonts).map((l) => ({
+      id: `${Math.round(l.box.x * 10)}:${Math.round(l.baseline * 10)}`,
+      text: l.text,
+      x: l.box.x,
+      y: l.box.y,
+      width: l.box.width,
+      height: l.box.height,
+      baseline: l.baseline,
+      size: l.size,
+      font: familyForText(l.text, l.family),
+      bold: l.bold,
+      italic: l.italic,
+      ocr: false,
+      source: l,
+    }))
+  } catch (err) {
+    console.warn('glyph capture failed, using text items', err)
+  }
+  const items = await detectFromItems(page, vector !== null)
+  return [...(vector ?? []), ...items]
+}
+
+async function detectFromItems(page: PDFPageProxy, ocrOnly: boolean): Promise<TextBlock[]> {
   const vp = page.getViewport({ scale: 1 })
   const tc = await page.getTextContent()
   const pieces: Piece[] = []
@@ -149,6 +184,7 @@ async function detect(page: PDFPageProxy): Promise<TextBlock[]> {
     const ascent = ocr ? 0.75 : style?.ascent && style.ascent > 0.4 ? style.ascent : 0.8
     const descent = ocr ? 0.25 : style?.descent && style.descent < 0 ? -style.descent : 0.22
     // it.width is in text space × scale; for horizontal text it equals page units.
+    if (ocrOnly && !ocr && !isInvisibleFont(it.fontName)) continue
     pieces.push({ str: it.str, x: tx, baseline: ty, width: it.width, size, ascent, descent, fontName: it.fontName, ocr })
   }
 

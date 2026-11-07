@@ -4,6 +4,8 @@ type Evt<E extends Event = Event> = Konva.KonvaEventObject<E>
 
 export interface NodeHandlers {
   onPointerDown?: (e: Evt<PointerEvent>) => void
+  onMouseDown?: (e: Evt<MouseEvent>) => void
+  onTouchStart?: (e: Evt<TouchEvent>) => void
   onClick?: (e: Evt<MouseEvent>) => void
   onTap?: (e: Evt<TouchEvent>) => void
   onDblClick?: (e: Evt<MouseEvent>) => void

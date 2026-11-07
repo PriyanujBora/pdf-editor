@@ -14,7 +14,10 @@ import { createTextAt, editTextBlock } from './actions'
 import { ImageNode } from './elements/ImageNode'
 import { TextNode } from './elements/TextNode'
 import { ScanTextNode } from './elements/ScanTextNode'
+import { SourceTextNode } from './elements/SourceTextNode'
+import { activeInput } from './active-input'
 import { isScanText } from '@/lib/scan/compose'
+import { caretAt, type LineLayout } from '@/lib/text/line-layout'
 
 interface Props {
   page: PageItem
@@ -55,6 +58,14 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
   const pdf = useSession((s) => s.pdf)
   const coarse = useMemo(() => isCoarsePointer(), [])
   const [blocks, setBlocks] = useState<TextBlock[] | null>(null)
+  /** Latest layout of each edited source line (caret placement from pointer x). */
+  const layouts = useRef(new Map<string, LineLayout>())
+  const onLayout = useMemo(() => new Map<string, (l: LineLayout) => void>(), [])
+  const layoutSink = (id: string) => {
+    let f = onLayout.get(id)
+    if (!f) onLayout.set(id, (f = (l: LineLayout) => void layouts.current.set(id, l)))
+    return f
+  }
 
   const rotated = page.rotation % 180 !== 0
   const stageW = (rotated ? height : width) * zoom
@@ -96,12 +107,21 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
 
   const covers = elements.flatMap((e) => (e.kind === 'text' && e.cover ? [{ id: e.id, ...e.cover }] : []))
   // Lines already replaced (vector cover or scan-matched) are not offered again.
-  const replaced = [...covers, ...elements.flatMap((e) => (e.kind === 'text' && e.scan ? [e.scan.lineBox] : []))]
+  const replaced = [
+    ...covers,
+    ...elements.flatMap((e) => (e.kind === 'text' && e.scan ? [e.scan.lineBox] : [])),
+    ...elements.flatMap((e) => (e.kind === 'text' && e.source ? [e.source.box] : [])),
+  ]
   const visibleBlocks = useMemo(() => {
     if (!textTools || !blocks) return []
-    // Hide lines that already have a replacement.
+    // Hide lines that already have a replacement — the same line, not neighbours whose boxes merely
+    // touch it (tightly set paragraphs have overlapping ascent/descent boxes).
     return blocks.filter(
-      (b) => !replaced.some((c) => b.x < c.x + c.width && b.x + b.width > c.x && b.y < c.y + c.height && b.y + b.height > c.y),
+      (b) =>
+        !replaced.some((c) => {
+          const overlapY = Math.min(b.y + b.height, c.y + c.height) - Math.max(b.y, c.y)
+          return b.x < c.x + c.width && b.x + b.width > c.x && overlapY > 0.5 * Math.min(b.height, c.height)
+        }),
     )
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [textTools, blocks, elements])
@@ -133,7 +153,7 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
       return
     }
     if (touch) primeKeyboard()
-    editTextBlock(page, b)
+    editTextBlock(page, b, groupRef.current?.getRelativePointerPosition() ?? undefined, blocks ?? [])
   }
 
   const onStageTap = (e: KEvt) => {
@@ -158,15 +178,55 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
     const tapEdit = (e: KEvt) => {
       e.cancelBubble = true
       const ui = useUi.getState()
+      // Clicks inside the line being edited only move the caret (handled on press).
+      if (ui.editingId === el.id) return
       const wasSelected = pressedSelected ?? ui.selectedId === el.id
       pressedSelected = null
       // Tapping an already-selected text (or any text with the text tools) edits it.
       if (el.kind === 'text' && (wasSelected || ui.tool !== 'select')) {
         primeKeyboard()
+        const L = layouts.current.get(el.id)
+        const pos = groupRef.current?.getRelativePointerPosition()
+        if (el.kind === 'text' && el.source && L && pos) ui.set({ caret: caretAt(L, pos.x) })
         ui.startEditing(el.id)
       } else select()
     }
+    /** While editing a source line, pressing on it places the caret (and drags a selection) without blurring. */
+    const pressCaret = (e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
+      const ui = useUi.getState()
+      const input = activeInput.current
+      const L = layouts.current.get(el.id)
+      if (el.kind !== 'text' || !el.source || ui.editingId !== el.id || !input || !L) return false
+      e.evt.preventDefault()
+      e.cancelBubble = true
+      const stage = e.target.getStage()
+      const at = () => {
+        const pos = groupRef.current?.getRelativePointerPosition()
+        return pos ? caretAt(L, pos.x) : input.selectionStart
+      }
+      const anchor = 'shiftKey' in e.evt && e.evt.shiftKey ? input.selectionStart : at()
+      const set = (i: number) => {
+        input.setSelectionRange(Math.min(anchor, i), Math.max(anchor, i), i < anchor ? 'backward' : 'forward')
+        useUi.getState().set({ textSel: [input.selectionStart, input.selectionEnd] })
+      }
+      set(at())
+      if (e.evt.type === 'mousedown') {
+        const move = (ev: MouseEvent) => {
+          stage?.setPointersPositions(ev)
+          set(at())
+        }
+        const up = () => {
+          window.removeEventListener('mousemove', move)
+          window.removeEventListener('mouseup', up)
+        }
+        window.addEventListener('mousemove', move)
+        window.addEventListener('mouseup', up)
+      }
+      return true
+    }
     return {
+      onMouseDown: (e: Konva.KonvaEventObject<MouseEvent>) => void pressCaret(e),
+      onTouchStart: (e: Konva.KonvaEventObject<TouchEvent>) => void pressCaret(e),
       onPointerDown: (e: Konva.KonvaEventObject<PointerEvent>) => {
         // Mouse/pen select on press so a drag can start immediately; touch waits for a tap.
         if (e.evt.pointerType !== 'touch' && useUi.getState().tool === 'select') {
@@ -179,7 +239,20 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
       onTap: tapEdit,
       onDblClick: (e: KEvt) => {
         e.cancelBubble = true
-        if (el.kind === 'text') useUi.getState().startEditing(el.id)
+        const ui = useUi.getState()
+        const input = activeInput.current
+        if (el.kind === 'text' && el.source && ui.editingId === el.id && input) {
+          // Double-click selects the word under the caret.
+          const v = input.value
+          let a = input.selectionStart
+          let b = a
+          while (a > 0 && /S/.test(v[a - 1])) a--
+          while (b < v.length && /S/.test(v[b])) b++
+          input.setSelectionRange(a, b)
+          ui.set({ textSel: [a, b] })
+          return
+        }
+        if (el.kind === 'text') ui.startEditing(el.id)
       },
       onDragEnd: (e: Konva.KonvaEventObject<DragEvent>) => {
         useDoc.getState().updateElement(el.id, { x: e.target.x(), y: e.target.y() }, { merge: false })
@@ -275,7 +348,19 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
           )}
 
           {elements.map((el) =>
-            el.kind === 'text' && el.scan ? null : el.kind === 'text' ? (
+            el.kind === 'text' && el.source ? (
+              <SourceTextNode
+                key={el.id}
+                el={el}
+                pageId={page.id}
+                pageRotation={page.rotation}
+                editing={el.id === editingId}
+                selected={el.id === selectedId}
+                draggable={tool === 'select' && (!coarse || el.id === selectedId)}
+                onLayout={layoutSink(el.id)}
+                {...handlersFor(el)}
+              />
+            ) : el.kind === 'text' && el.scan ? null : el.kind === 'text' ? (
               <TextNode
                 key={el.id}
                 el={el}
@@ -298,11 +383,14 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
 
         <Transformer
           ref={trRef}
-          rotateEnabled
+          rotateEnabled={!(selectedEl?.kind === 'text' && selectedEl.source)}
           flipEnabled={false}
           keepRatio
           enabledAnchors={
-            selectedEl?.kind === 'text'
+            // Edited original text moves but never changes size by accident: size is in the panel.
+            selectedEl?.kind === 'text' && selectedEl.source
+              ? []
+              : selectedEl?.kind === 'text'
               ? ['top-left', 'top-right', 'bottom-left', 'bottom-right']
               : [
                   'top-left',

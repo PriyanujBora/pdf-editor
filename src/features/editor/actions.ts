@@ -3,7 +3,9 @@ import { downloadBytes, editedFileName, exportPdf } from '@/lib/export/export-cl
 import { ImageError, ingestImage } from '@/lib/images'
 import { uid } from '@/lib/ids'
 import { sampleColors } from '@/lib/pdf/sample'
-import { scanDocumentInBackground } from '@/lib/pdf/font-scan'
+import { originalFontFor, refreshOriginal, scanDocumentInBackground } from '@/lib/pdf/font-scan'
+import { caretAt, layoutLine } from '@/lib/text/line-layout'
+import { measureCanvas } from '@/lib/text/measure-canvas'
 import { fitScanLine } from '@/lib/scan/fit'
 import type { TextBlock } from '@/lib/pdf/text-blocks'
 import { ASCENT } from '@/lib/text-layout'
@@ -11,7 +13,7 @@ import { apply, rotate, userRotation } from '@/lib/export/matrix'
 import { useDoc } from '@/store/document'
 import { useSession } from '@/store/session'
 import { useUi } from '@/store/ui'
-import type { PageItem, TextElement } from '@/types'
+import type { EditorElement, OriginalFont, PageItem, PtRect, TextElement } from '@/types'
 
 /** Last rendered canvas per page, used to sample colours. */
 export const renderedCanvases = new Map<string, { canvas: HTMLCanvasElement; scale: number }>()
@@ -115,9 +117,134 @@ async function editScanBlock(page: PageItem, block: TextBlock) {
 }
 
 /** Turns a detected line of existing text into an editable replacement. */
-export function editTextBlock(page: PageItem, block: TextBlock) {
+export function editTextBlock(page: PageItem, block: TextBlock, at?: { x: number; y: number }, all: TextBlock[] = []) {
   if (block.ocr) void editScanBlock(page, block)
+  else if (block.source) editSourceLine(page, block, at, all)
   else editVectorBlock(page, block)
+}
+
+// --- Edit sessions -------------------------------------------------------------
+//
+// Clicking a line must not change the document. Editing a source line runs as a session with undo
+// tracking paused: if the line ends up exactly as printed, the draft element is dropped and nothing
+// is recorded; otherwise the whole session becomes a single undo step.
+
+let session: { id: string; pre: { pages: PageItem[]; elements: Record<string, EditorElement> } } | null = null
+
+export function isNoOpEdit(el: EditorElement | undefined): boolean {
+  if (!el || el.kind !== 'text' || !el.source) return false
+  const b = el.source.box
+  return el.text === el.source.text && !el.override && Math.abs(el.x - b.x) < 0.005 && Math.abs(el.y - b.y) < 0.005
+}
+
+export function beginEditSession(id: string) {
+  if (session?.id === id) return
+  if (session) endEditSession(session.id)
+  const d = useDoc.getState()
+  session = { id, pre: { pages: d.pages, elements: d.elements } }
+  useDoc.temporal.getState().pause()
+}
+
+export function endEditSession(id: string) {
+  if (!session || session.id !== id) return
+  const { pre } = session
+  session = null
+  const doc = useDoc.getState()
+  if (isNoOpEdit(doc.elements[id])) {
+    doc.removeElement(id)
+    const ui = useUi.getState()
+    if (ui.selectedId === id) ui.set({ selectedId: null })
+  }
+  const t = useDoc.temporal.getState()
+  t.resume()
+  const now = useDoc.getState()
+  const keys = new Set([...Object.keys(pre.elements), ...Object.keys(now.elements)])
+  const same = now.pages === pre.pages && [...keys].every((k) => now.elements[k] === pre.elements[k])
+  if (!same) useDoc.temporal.setState((st) => ({ pastStates: [...st.pastStates, pre].slice(-200), futureStates: [] }))
+}
+
+/** Page colour behind a page-space rectangle (for patches over changed words). */
+function sampleBackground(page: PageItem, r: PtRect): { background: string; ink: string } {
+  const rendered = renderedCanvases.get(page.id)
+  if (!rendered) return { background: '#ffffff', ink: '#000000' }
+  const { width, height } = pageSize(page)
+  const m = userRotation(page.rotation, width, height)
+  const p1 = apply(m, r.x, r.y)
+  const p2 = apply(m, r.x + r.width, r.y + r.height)
+  const k = rendered.scale
+  return sampleColors(rendered.canvas, {
+    x: Math.min(p1.x, p2.x) * k,
+    y: Math.min(p1.y, p2.y) * k,
+    w: Math.abs(p2.x - p1.x) * k,
+    h: Math.abs(p2.y - p1.y) * k,
+  })
+}
+
+/** Edit an existing vector line: nothing changes on the page until the text does. */
+function editSourceLine(page: PageItem, block: TextBlock, at: { x: number; y: number } | undefined, all: TextBlock[]) {
+  const line = block.source!
+  // Where boxes of neighbouring lines overlap, split the band where the ink is: descenders reach
+  // ~0.23 em below a baseline, ascenders ~0.76 em above one. Patches stay on this line's side.
+  const pad = 0.25
+  let coverTop = line.box.y - pad
+  let coverBottom = line.box.y + line.box.height + pad
+  for (const o of all) {
+    const b = o.source?.box
+    if (!b || o === block || b.x >= line.box.x + line.box.width || b.x + b.width <= line.box.x) continue
+    // Only genuine neighbours: pieces of the same row (or a merged superscript) are not.
+    if (Math.abs(o.baseline - line.baseline) < 0.6 * Math.max(line.size, o.size)) continue
+    const oBottom = b.y + b.height
+    if (o.baseline < line.baseline && oBottom > coverTop)
+      coverTop = Math.max(coverTop, Math.min(line.baseline - 0.5 * line.size, o.baseline + 0.23 * o.size))
+    if (o.baseline > line.baseline && b.y < coverBottom)
+      coverBottom = Math.min(coverBottom, Math.max(line.baseline + 0.15 * line.size, o.baseline - 0.76 * o.size))
+  }
+  const sp = Math.max(1, line.size * 0.08)
+  const { background } = sampleBackground(page, {
+    x: line.box.x - sp,
+    y: line.box.y - sp,
+    width: line.box.width + 2 * sp,
+    height: line.box.height + 2 * sp,
+  })
+  // Glyphs each font has drawn anywhere in the document so far (more pages scanned → more).
+  const fonts: Record<string, OriginalFont> = {}
+  for (const r of line.runs) {
+    if (r.type3 || fonts[r.baseFont]) continue
+    const f = originalFontFor(r.loadedName)
+    if (f) fonts[r.baseFont] = refreshOriginal(f)
+  }
+  // Semi-transparent text (Canva & co. grey via opacity): flatten against the page colour.
+  const flat = (hex: string, alpha = 1) => {
+    if (alpha >= 0.999) return hex
+    const c = (h: string, i: number) => parseInt(h.slice(1 + 2 * i, 3 + 2 * i), 16)
+    return '#' + [0, 1, 2].map((i) => Math.round(c(hex, i) * alpha + c(background, i) * (1 - alpha)).toString(16).padStart(2, '0')).join('')
+  }
+  const runs = line.runs.map((r) => ({ ...r, color: flat(r.color, r.alpha), alpha: 1 }))
+  const { size, family, bold, italic, ...rest } = { ...line, runs }
+  const color = runs.find((r) => r.color)?.color ?? line.color
+  const el: TextElement = {
+    id: uid('t_'),
+    kind: 'text',
+    pageId: page.id,
+    x: line.box.x,
+    y: line.box.y,
+    rotation: 0,
+    text: line.text,
+    font: family,
+    size: Math.round(size * 100) / 100,
+    color,
+    bold,
+    italic,
+    align: 'left',
+    lineHeight: 1.2,
+    source: { ...rest, background, fonts, coverTop, coverBottom },
+  }
+  const caret = at ? caretAt(layoutLine(el, measureCanvas), at.x) : el.text.length
+  beginEditSession(el.id)
+  useDoc.getState().addElement(el)
+  useUi.getState().set({ selectedId: el.id, editingId: el.id, caret })
+  const pdf = useSession.getState().pdf
+  if (pdf) scanDocumentInBackground(pdf)
 }
 
 /** Replacement drawn on top: background-coloured cover + new text. */

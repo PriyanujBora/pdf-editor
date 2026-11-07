@@ -22,6 +22,8 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { FONT_FAMILIES, FONT_LIST } from '@/lib/fonts'
 import { displayFontName, missingGlyphs } from '@/lib/original-font'
 import { refreshOriginal } from '@/lib/pdf/font-scan'
+import { layoutLine } from '@/lib/text/line-layout'
+import { measureCanvas } from '@/lib/text/measure-canvas'
 import { cn } from '@/lib/utils'
 import { useDoc } from '@/store/document'
 import { useUi } from '@/store/ui'
@@ -47,6 +49,7 @@ function rotateBy(el: EditorElement, delta: number) {
 }
 
 const ORIGINAL = '__original'
+const PRINTED = '__printed'
 
 /** Switch a scan-matched edit to the plain approach: paper-coloured cover + text on top. */
 function plainPatch(el: TextElement) {
@@ -68,14 +71,23 @@ function plainPatch(el: TextElement) {
 
 function TextProps({ el }: { el: TextElement }) {
   const f = FONT_FAMILIES[el.font]
-  const missing = el.original && el.useOriginal ? missingGlyphs(el.text, el.original) : []
+  const src = el.source
+  const missing = src
+    ? el.override
+      ? []
+      : layoutLine(el, measureCanvas).fallbackChars
+    : el.original && el.useOriginal
+      ? missingGlyphs(el.text, el.original)
+      : []
+  // Restyling an edited line draws every word in the chosen style.
+  const style = (patch: Partial<TextElement>) => update(el.id, src ? { ...patch, override: true } : patch)
   // Other pages may have shown more of this font since the edit started.
   useEffect(() => {
     if (!missing.length || !el.original) return
     const fresh = refreshOriginal(el.original)
     if (Object.keys(fresh.glyphs).length > Object.keys(el.original.glyphs).length) update(el.id, { original: fresh })
   }, [missing.length, el.id, el.original])
-  const setSize = (s: number) => update(el.id, { size: Math.min(400, Math.max(2, Math.round(s * 10) / 10)) })
+  const setSize = (s: number) => style({ size: Math.min(400, Math.max(2, Math.round(s * 10) / 10)) })
   return (
     <div className="grid gap-5">
       <Field label="Text">
@@ -90,22 +102,31 @@ function TextProps({ el }: { el: TextElement }) {
 
       <Field label="Font">
         <Select
-          value={el.original && el.useOriginal ? ORIGINAL : el.font}
+          value={src ? (el.override ? el.font : PRINTED) : el.original && el.useOriginal ? ORIGINAL : el.font}
           onValueChange={(v) =>
-            v === ORIGINAL
-              ? update(el.id, { useOriginal: true })
-              : update(el.id, {
-                  font: v as FontFamilyId,
-                  useOriginal: false,
-                  italic: el.italic && FONT_FAMILIES[v as FontFamilyId].hasItalic,
-                })
+            v === PRINTED
+              ? update(el.id, { override: false })
+              : v === ORIGINAL
+                ? update(el.id, { useOriginal: true })
+                : src
+                  ? style({ font: v as FontFamilyId })
+                  : update(el.id, {
+                      font: v as FontFamilyId,
+                      useOriginal: false,
+                      italic: el.italic && FONT_FAMILIES[v as FontFamilyId].hasItalic,
+                    })
           }
         >
           <SelectTrigger className="h-11 w-full lg:h-9" aria-label="Font">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {el.original && (
+            {src && (
+              <SelectItem value={PRINTED} className="h-10 lg:h-8">
+                <span className="truncate">As printed (PDF’s own fonts)</span>
+              </SelectItem>
+            )}
+            {!src && el.original && (
               <SelectItem value={ORIGINAL} className="h-10 lg:h-8">
                 <span className="truncate">Original · {displayFontName(el.original.baseFont)}</span>
               </SelectItem>
@@ -120,7 +141,8 @@ function TextProps({ el }: { el: TextElement }) {
         {missing.length > 0 && (
           <p className="text-xs text-muted-foreground" role="status">
             {missing.map((c) => `“${c}”`).join(' ')} {missing.length === 1 ? 'isn’t' : 'aren’t'} available in the original font
-            (PDFs usually embed only the characters they use), so this text uses {f.label}.
+            (PDFs usually embed only the characters they use), so {missing.length === 1 ? 'it uses' : 'they use'}{' '}
+            {src ? 'the closest bundled font' : f.label}.
           </p>
         )}
       </Field>
@@ -161,7 +183,7 @@ function TextProps({ el }: { el: TextElement }) {
               variant="outline"
               className="h-11 flex-1 lg:h-9"
               pressed={el.bold}
-              onPressedChange={(bold) => update(el.id, { bold, useOriginal: false })}
+              onPressedChange={(bold) => (src ? style({ bold }) : update(el.id, { bold, useOriginal: false }))}
               aria-label="Bold"
             >
               <Bold />
@@ -170,7 +192,7 @@ function TextProps({ el }: { el: TextElement }) {
               variant="outline"
               className="h-11 flex-1 lg:h-9"
               pressed={el.italic}
-              onPressedChange={(italic) => update(el.id, { italic, useOriginal: false })}
+              onPressedChange={(italic) => (src ? style({ italic }) : update(el.id, { italic, useOriginal: false }))}
               aria-label="Italic"
               title={f.hasItalic ? 'Italic' : 'Slanted (this font has no italic)'}
             >
@@ -186,7 +208,7 @@ function TextProps({ el }: { el: TextElement }) {
             <button
               key={c}
               aria-label={`Colour ${c}`}
-              onClick={() => update(el.id, { color: c })}
+              onClick={() => style({ color: c })}
               className={cn(
                 'size-9 rounded-full border shadow-xs ring-offset-2 ring-offset-background transition-transform active:scale-95 lg:size-7',
                 el.color.toLowerCase() === c && 'ring-2 ring-brand',
@@ -201,7 +223,7 @@ function TextProps({ el }: { el: TextElement }) {
             <input
               type="color"
               value={el.color}
-              onChange={(e) => update(el.id, { color: e.target.value })}
+              onChange={(e) => style({ color: e.target.value })}
               className="absolute inset-0 cursor-pointer opacity-0"
               aria-label="Custom colour"
             />
@@ -209,7 +231,7 @@ function TextProps({ el }: { el: TextElement }) {
         </div>
       </Field>
 
-      {!el.scan && (
+      {!el.scan && !src && (
         <Field label="Align">
           <ToggleGroup
             type="single"
@@ -250,6 +272,20 @@ function TextProps({ el }: { el: TextElement }) {
         </div>
       )}
 
+      {src && (
+        <div className="rounded-xl border border-dashed p-3 text-sm" data-testid="source-edit">
+          <p className="text-xs font-medium text-muted-foreground">Edits printed text</p>
+          <p className="mt-1 line-clamp-2 break-words">{src.text}</p>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Words you didn’t change keep the PDF’s own letters and positions. Changed words are drawn on a patch over the
+            old ones — the old words are still in the file underneath and can be found by searching it.
+          </p>
+          <Button variant="ghost" className="mt-2 h-10 w-full justify-start gap-2 lg:h-8" onClick={deleteSelected}>
+            <Undo /> Restore original
+          </Button>
+        </div>
+      )}
+
       {el.cover && (
         <div className="rounded-xl border border-dashed p-3 text-sm">
           <p className="text-xs font-medium text-muted-foreground">Replaces original text</p>
@@ -283,8 +319,8 @@ export function PropertiesPanel({ className }: { className?: string }) {
   const el = useDoc((s) => (selectedId ? s.elements[selectedId] : undefined))
   const tool = useUi((s) => s.tool)
 
-  // Scan-matched text is locked to its line.
-  const locked = el?.kind === 'text' && !!el.scan
+  // Scan-matched text is locked to its line; edited printed text moves but doesn't rotate.
+  const locked = el?.kind === 'text' && (!!el.scan || !!el.source)
 
   if (!el) {
     const t = TOOLS.find((x) => x.id === tool)
@@ -308,7 +344,7 @@ export function PropertiesPanel({ className }: { className?: string }) {
   return (
     <div className={cn('grid gap-5 p-4', className)}>
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold">{el.kind === 'text' ? (el.cover || el.scan ? 'Edited text' : 'Text') : 'Image'}</h2>
+        <h2 className="text-sm font-semibold">{el.kind === 'text' ? (el.cover || el.scan || el.source ? 'Edited text' : 'Text') : 'Image'}</h2>
         <div className={cn('flex gap-1', locked && 'hidden')}>
           <Button
             variant="ghost"

@@ -23,6 +23,8 @@ interface PdfJsFont {
   vertical?: boolean
   fontMatrix?: number[]
   isSerifFont?: boolean
+  /** Not embedded: pdf.js draws it with a system font and registers no FontFace. */
+  missingFile?: boolean
 }
 
 interface FontRecord {
@@ -141,7 +143,8 @@ async function scan(page: PDFPageProxy, key: string) {
       rec.loadedName = current
       byBase.set(info.name!, rec)
       byLoaded.set(current, rec)
-      faces[info.name!] = current
+      // Only embedded fonts have a FontFace to draw with; others render with a stand-in.
+      if (!info.missingFile) faces[info.name!] = current
     }
     const glyphs = rec.font.glyphs
     for (const g of ops.argsArray[i][0] as (PdfJsGlyph | number | null)[]) {

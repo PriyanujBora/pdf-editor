@@ -30,6 +30,7 @@ import {
 import { FONT_FAMILIES, fontFileUrl, fontRuns, OBLIQUE_SHEAR } from '@/lib/fonts'
 import { encodeLine, usesOriginal, type OriginalFont } from '@/lib/original-font'
 import { alignOffset, baselineOffset, splitLines } from '@/lib/text-layout'
+import { layoutLine, type Measure } from '@/lib/text/line-layout'
 import type { Cover, FontFamilyId, ImageElement, TextElement } from '@/types'
 import { compatFontkit } from './fontkit-compat'
 import { elementFrame, invert, mul, pdfToPage, type Mat } from './matrix'
@@ -108,6 +109,10 @@ async function buildPdf(req: ExportRequest): Promise<Uint8Array> {
     }
     for (const el of els) {
       if (el.kind === 'text' && el.scan) continue
+      if (el.kind === 'text' && el.source) {
+        await drawSourceLine(page, toPdf, el, fonts, originals)
+        continue
+      }
       if (el.kind === 'text') {
         if (!drawOriginalText(page, toPdf, el, originals)) await drawText(page, toPdf, el, fonts)
       } else await drawImage(page, toPdf, el, req, images, out)
@@ -311,18 +316,38 @@ class OriginalFonts {
     this.doc = doc
   }
 
-  private matches(dict: PDFDict, f: OriginalFont) {
+  private matches(dict: PDFDict, f: OriginalFont, type3 = false) {
     const bf = dict.get(N('BaseFont'))
     if (!(bf instanceof PDFName) || bf.decodeText() !== f.baseFont) return false
     const sub = dict.get(N('Subtype'))
     if (!(sub instanceof PDFName)) return false
     // Composite fonts: only Identity-H, where our 2-byte codes are the CIDs.
     if (f.composite) return sub === N('Type0') && dict.get(N('Encoding')) === N('Identity-H')
-    return SIMPLE.has(sub.decodeText())
+    return SIMPLE.has(sub.decodeText()) || (type3 && sub === N('Type3'))
+  }
+
+  /** A Type3 font on the page whose /Widths match the captured (code, width) pairs. */
+  keyForType3(page: PDFPage, sig: [number, number][]): PDFName | null {
+    const ctx = this.doc.context
+    const fontRes = page.node.Resources()?.lookupMaybe(N('Font'), PDFDict)
+    if (!fontRes || !sig.length) return null
+    for (const [key, val] of fontRes.entries()) {
+      const dict = ctx.lookupMaybe(val, PDFDict)
+      if (!dict || dict.get(N('Subtype')) !== N('Type3')) continue
+      const first = (dict.lookup(N('FirstChar')) as { asNumber?: () => number } | undefined)?.asNumber?.() ?? 0
+      const widths = dict.lookupMaybe(N('Widths'), PDFArray)
+      if (!widths) continue
+      const ok = sig.every(([code, w]) => {
+        const v = (ctx.lookup(widths.get(code - first)) as { asNumber?: () => number } | undefined)?.asNumber?.()
+        return v !== undefined && Math.abs(v - w) < 1e-3 * Math.max(1, Math.abs(w))
+      })
+      if (ok) return key
+    }
+    return null
   }
 
   /** Existing key on the page, or the font registered under a new key. */
-  keyFor(page: PDFPage, f: OriginalFont): PDFName | null {
+  keyFor(page: PDFPage, f: OriginalFont, type3 = false): PDFName | null {
     let perPage = this.keys.get(page)
     if (!perPage) this.keys.set(page, (perPage = new Map()))
     const cached = perPage.get(f.baseFont)
@@ -333,7 +358,7 @@ class OriginalFonts {
     if (fontRes) {
       for (const [key, val] of fontRes.entries()) {
         const dict = ctx.lookupMaybe(val, PDFDict)
-        if (dict && this.matches(dict, f)) {
+        if (dict && this.matches(dict, f, type3)) {
           perPage.set(f.baseFont, key)
           return key
         }
@@ -344,7 +369,7 @@ class OriginalFonts {
     if (ref === undefined) {
       ref = null
       for (const [r, obj] of ctx.enumerateIndirectObjects()) {
-        if (obj instanceof PDFDict && this.matches(obj, f)) {
+        if (obj instanceof PDFDict && this.matches(obj, f, type3)) {
           ref = r
           break
         }
@@ -397,4 +422,92 @@ function drawOriginalText(page: PDFPage, toPdf: Mat, el: TextElement, originals:
     page.pushOperators(endText())
   })
   return true
+}
+
+// --- Edited existing lines ---------------------------------------------------------
+
+/**
+ * Draws an edited existing line with the same layout as the editor (lib/text/line-layout.ts):
+ * unchanged words emit nothing (the PDF's own glyphs stay as they are), changed or shifted words get
+ * a patch in the sampled page colour and are drawn again — original glyphs with the original font
+ * dictionary and the same codes, new characters with the PDF font where it has them, otherwise the
+ * metric-compatible stand-in, glyph by glyph.
+ */
+async function drawSourceLine(page: PDFPage, toPdf: Mat, el: TextElement, fonts: FontCache, originals: OriginalFonts) {
+  const src = el.source!
+  // Stand-in fonts the layout may use, loaded up front so measuring is synchronous.
+  const loaded = new Map<string, PDFFont>()
+  const want: [FontFamilyId, boolean, boolean][] = src.runs.map((r) => [r.family, r.bold, r.italic])
+  if (el.override) want.push([el.font, el.bold, el.italic])
+  for (const [f, b, i] of want) {
+    const k = `${f}|${+b}|${+i}`
+    if (!loaded.has(k)) loaded.set(k, await fonts.get(f, b, i))
+  }
+  const fontOf = (f: FontFamilyId, b: boolean, i: boolean) => loaded.get(`${f}|${+b}|${+i}`)
+  const measure: Measure = (family, bold, italic, text) => {
+    const font = fontOf(family, bold, italic)
+    const emb = (font as unknown as { embedder?: SubsetEmbedder })?.embedder
+    if (!font) return 0.5 * [...text].length
+    if (emb?.font?.layout) return emb.font.layout(text, emb.fontFeatures).positions.reduce((s, p) => s + p.xAdvance, 0) / emb.font.unitsPerEm
+    return font.widthOfTextAtSize(text, 1)
+  }
+  const L = layoutLine(el, measure)
+  if (!L.changed) return
+  for (const c of L.covers) drawCover(page, toPdf, { ...c, color: src.background, original: '' })
+
+  const ctx = page.doc.context
+  withFrame(page, mul(toPdf, elementFrame(0, 0, 0)), () => {
+    let color = ''
+    const fill = (hex: string) => {
+      if (hex === color) return
+      color = hex
+      const c = hexToRgb(hex)
+      page.pushOperators(setFillingRgbColor(c.red, c.green, c.blue))
+    }
+    page.pushOperators(beginText())
+    const standIn = (text: string, family: FontFamilyId, bold: boolean, italic: boolean, size: number, hScale: number, hex: string, x: number, y: number) => {
+      const font = fontOf(family, bold, italic)
+      if (!font) return
+      const emb = (font as unknown as { embedder?: SubsetEmbedder }).embedder ?? null
+      const key = fonts.key(page, font)
+      fill(hex)
+      page.pushOperators(setFontAndSize(key, size))
+      const shear = italic && !FONT_FAMILIES[family].hasItalic ? OBLIQUE_SHEAR : 0
+      if (emb?.font?.layout) {
+        const run = emb.font.layout(text, emb.fontFeatures)
+        const k = size / emb.font.unitsPerEm
+        let pen = x
+        run.glyphs.forEach((g, gi) => {
+          const p = run.positions[gi]
+          page.pushOperators(
+            setTextMatrix(hScale, 0, shear, 1, pen + p.xOffset * k * hScale, -y + p.yOffset * k),
+            showText(PDFHexString.of(hex4(encodeGlyph(emb, g)))),
+          )
+          pen += p.xAdvance * k * hScale
+        })
+      } else page.pushOperators(setTextMatrix(hScale, 0, shear, 1, x, -y), showText(font.encodeText(text)))
+    }
+    for (const d of L.draws) {
+      if (d.kind === 'text') {
+        standIn(d.text, d.family, d.bold, d.italic, d.size, d.hScale, d.color, d.x, d.y)
+        continue
+      }
+      const run = src.runs[d.run]
+      const key = run.type3
+        ? originals.keyForType3(page, run.widthSig ?? [])
+        : originals.keyFor(page, { baseFont: run.baseFont, composite: run.composite, glyphs: {}, spaceGap: 0 })
+      if (!key) {
+        standIn(d.uni, run.family, run.bold, run.italic, run.size * run.familyScale, run.hScale, run.color, d.x, d.y)
+        continue
+      }
+      fill(run.color)
+      const code = d.code.toString(16).padStart(run.composite ? 4 : 2, '0')
+      page.pushOperators(
+        setFontAndSize(key, run.size),
+        setTextMatrix(run.hScale, 0, 0, 1, d.x, -d.y),
+        PDFOperator.of(PDFOperatorNames.ShowTextAdjusted, [ctx.obj([PDFHexString.of(code)]) as PDFArray]),
+      )
+    }
+    page.pushOperators(endText())
+  })
 }

@@ -100,16 +100,19 @@ await test('desktop: open text-heavy, add/edit text, image, pages, export', DESK
   await page.waitForSelector('textarea[aria-label="Edit text"]')
   const original = await page.inputValue('textarea[aria-label="Edit text"]')
   assert.match(original, /Invoice total/)
+  // Clicking only places the caret; nothing is replaced until you type.
+  assert.equal((await elements(page)).filter((e) => e.kind === 'text' && e.source).length, 1)
+  await page.keyboard.press('Control+a')
   await page.keyboard.type('Invoice total: $99.00 PAID')
   await page.keyboard.press('Escape')
   els = await elements(page)
-  const edited = els.find((e) => e.cover)
+  const edited = els.find((e) => e.source)
   assert.ok(edited, 'replacement created')
   assert.equal(edited.text, 'Invoice total: $99.00 PAID')
   assert.ok(Math.abs(edited.size - 14) < 0.5, `size matched (${edited.size})`)
   assert.equal(edited.font, 'roboto')
   assert.ok(/^#(1|2)/.test(edited.color), `colour sampled (${edited.color})`)
-  assert.ok(edited.cover.color.toLowerCase() !== '#ffffff', `cover samples box bg (${edited.cover.color})`)
+  assert.ok(edited.source.background.toLowerCase() !== '#ffffff', `patch samples box bg (${edited.source.background})`)
   await page.screenshot({ path: `${OUT}/desktop-edited.png` })
 
   // 5. Add an image
@@ -172,6 +175,30 @@ await test('desktop: tapping existing text in Select mode edits it', DESKTOP, as
   assert.match(await page.inputValue('textarea[aria-label="Edit text"]'), /Invoice total/)
 })
 
+await test('desktop: clicking a line and leaving changes nothing (no element, no undo step, same pixels)', DESKTOP, async (page) => {
+  await open(page, 'text-heavy.pdf')
+  await page.waitForTimeout(800)
+  const p = await pagePoint(page, 0, 120, 120)
+  const clip = { x: p.x - 80, y: p.y - 16, width: 420, height: 32 }
+  const before = await page.screenshot({ clip })
+  await page.mouse.click(p.x, p.y)
+  await page.waitForSelector('textarea[aria-label="Edit text"]')
+  const sel = await page.evaluate(() => {
+    const t = document.querySelector('textarea[aria-label="Edit text"]')
+    return [t.selectionStart, t.selectionEnd]
+  })
+  assert.equal(sel[0], sel[1], 'caret, not a selection')
+  assert.ok(sel[0] > 0 && sel[0] < 20, `caret near the click (${sel[0]})`)
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(300)
+  assert.equal((await elements(page)).length, 0, 'no element left behind')
+  assert.equal(await state(page, () => window.__doc.temporal.getState().pastStates.length), 0, 'no undo step')
+  await page.mouse.move(5, 5) // hover highlight off
+  await page.waitForTimeout(200)
+  const after = await page.screenshot({ clip })
+  assert.ok(before.equals(after), 'line pixels unchanged')
+})
+
 await test('desktop: edits default to the PDF’s own font, fall back when a glyph is missing', DESKTOP, async (page) => {
   await open(page, 'text-heavy.pdf')
   await page.waitForTimeout(800)
@@ -182,14 +209,14 @@ await test('desktop: edits default to the PDF’s own font, fall back when a gly
   await page.keyboard.type('Invoice total: $12,000.00 due 30 Nov 2026')
   await page.keyboard.press('Escape')
   let el = (await elements(page))[0]
-  assert.equal(el.useOriginal, true)
-  assert.match(el.original.baseFont, /Roboto/)
-  assert.match(await page.textContent('[aria-label=Font]'), /Original/)
+  assert.ok(!el.override, 'still drawn as printed')
+  assert.match(el.source.runs[0].baseFont, /Roboto/)
+  assert.match(await page.textContent('[aria-label=Font]'), /As printed/)
   // "Q" was never drawn with this subset → bundled fallback + explanation.
   await page.fill('textarea[placeholder="Type here"]', 'Quote total')
   await page.waitForSelector('text=available in the original font')
   el = (await elements(page))[0]
-  assert.equal(el.useOriginal, true, 'preference kept; fallback is automatic')
+  assert.ok(!el.override, 'only the missing glyph falls back; the line keeps its own font')
   await download(page, 'original-font-export.pdf')
 })
 

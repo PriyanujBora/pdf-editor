@@ -12,7 +12,11 @@ export interface SavedMeta {
   pages: PageItem[]
   elements: Record<string, EditorElement>
   savedAt: number
-  version: 1
+  /**
+   * 2 = text elements may carry `source` (edited printed lines). Version-1 saves load unchanged:
+   * their edited lines are cover-based elements, which still render and export as before.
+   */
+  version: 1 | 2
 }
 
 export async function saveSource(fileName: string, bytes: Uint8Array) {
@@ -28,7 +32,7 @@ export async function saveSource(fileName: string, bytes: Uint8Array) {
 }
 
 export async function saveState(meta: Omit<SavedMeta, 'savedAt' | 'version'>) {
-  await set('meta', { ...meta, savedAt: Date.now(), version: 1 } satisfies SavedMeta, store)
+  await set('meta', { ...meta, savedAt: Date.now(), version: 2 } satisfies SavedMeta, store)
 }
 
 export async function saveAssets(assets: Record<string, ImageAsset>) {

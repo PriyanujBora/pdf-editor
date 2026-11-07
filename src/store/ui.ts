@@ -8,6 +8,10 @@ interface UiState {
   selectedId: string | null
   /** Element whose text is being typed into the inline editor. */
   editingId: string | null
+  /** Where the caret goes when editing starts (character index), e.g. the clicked position. */
+  caret: number | null
+  /** Live selection [start, end] of the inline editor; the canvas draws caret and highlight. */
+  textSel: [number, number] | null
   /** Page id most visible in the viewport (drives the thumbnail highlight). */
   currentPageId: string | null
   thumbsOpen: boolean
@@ -40,6 +44,8 @@ export const useUi = create<UiState>()((set) => ({
   zoom: 1,
   selectedId: null,
   editingId: null,
+  caret: null,
+  textSel: null,
   currentPageId: null,
   thumbsOpen: false,
   propsOpen: false,
