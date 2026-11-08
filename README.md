@@ -48,6 +48,10 @@ npx wrangler deploy
 - Clicking existing text edits its whole paragraph: the text reflows within the paragraph's column,
   alignment (including justified) and line spacing, unchanged words keep the PDF's own letters, and
   text that no longer fits is outlined with a "Shrink to fit" option. Alt-click edits a single line.
+- Fill in forms (and flatten them), turn a flat printed form into a fillable one, sign (draw, type or
+  upload; saved only on your device), annotate (highlight, underline, strike, notes, drawings, shapes —
+  standard PDF annotations), insert pages from other PDFs, add blank pages, duplicate, extract or split,
+  and compress images with a size preview.
 - Redaction removes what is under each mark from the file — text (including invisible OCR text), image
   pixels, drawings, comments, form fields — then draws a black box. Find & redact searches words, regular
   expressions and common patterns (emails, phone numbers, PAN, Aadhaar, card numbers). Optional clean-up

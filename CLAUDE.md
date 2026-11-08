@@ -31,6 +31,8 @@ npm run test:prod      # smoke test of the built app under wrangler dev (CSP, ex
 npm run test:fidelity  # export keeps forms/outlines/tags/attachments/labels/encryption (dev server + tests/.venv)
 npm run test:redaction # redact through the UI, then pdftotext/pypdf/PDFium/raw-object/pixel checks (same needs)
 npm run test:paragraphs # paragraph reflow: column, justify, hanging indent, bold kept, Bengali glyphs (same needs)
+npm run test:forms     # fill every field kind, undo, flatten, autosave (same needs)
+npm run test:everyday  # signatures, annotations, pages (insert/blank/duplicate/extract), flat→fillable, compress
 npm run test:edit-stability [-- filter]  # every editable line of fixtures + tests/corpus: no-op, editing,
                        # same-length word, missing glyph, size (needs dev server + tests/.venv, see tests/tools)
 npm run corpus:word    # real Word "Save as PDF" output into tests/corpus (Windows + Word only)
@@ -80,6 +82,15 @@ src/
   lib/export/sanitize.ts    clean-up options (metadata, JS, attachments, hidden layers, comments, values)
   lib/export/verify-scan.ts leak scan of every object for marked strings; bookmark/tag scrubbing
   features/editor/Redact*   RedactPanel (Find & redact, marks, clean-up), redact-actions, redact-download
+  lib/page-source.ts        where a page comes from (opened file / inserted PDF / blank): pdf.js doc, info, cache key
+  lib/forms.ts, features/editor/FormLayer.tsx, FormPanel.tsx   fill in the file's form (HTML inputs over widgets)
+  lib/export/fill-form.ts   write changed values (+ appearances), create new fields, flatten
+  lib/fields/detect.ts      flat form → fillable: lines, boxes, tick boxes, underscores from the page's drawings
+  lib/signatures.ts, SignatureDialog.tsx, sign-actions.ts   draw / type / upload → transparent PNG; IndexedDB
+  lib/annotations.ts, AnnotateBar.tsx, AnnotPanel.tsx, export/annotations.ts   markup, notes, ink, shapes
+  lib/export/assemble.ts    output pages: duplicates, blanks, inserted PDFs (links, outlines, fields merged)
+  lib/export/compress.ts    resample images above a target dpi, in place
+  features/editor/page-actions.ts, ExtractDialog.tsx, CompressDialog.tsx
 public/fonts/               bundled TTFs — Inter, Roboto, Tinos (Times-metric, Apache-2.0), Noto Serif,
                             Noto Sans Bengali/Devanagari, and metric clones Arimo (Arial/Helvetica),
                             Carlito (Calibri), Cousine (Courier), Gelasio (Georgia) — OFL; the clones are
@@ -108,6 +119,11 @@ public/fonts/               bundled TTFs — Inter, Roboto, Tinos (Times-metric,
   glyphs/runs concatenated) with `source.para` = the lines + column/leading/alignment. `layoutLine`
   dispatches to `layoutParagraph`. A plain click edits the paragraph, Alt-click (or "Edit this line
   only") one line. `paraScale` = Shrink to fit.
+- `PageItem.doc` = an inserted PDF (`session.docs`, autosaved as "doc:<id>"), `PageItem.blank` = a new blank
+  page. Never read `session.pdf`/`sourcePages[srcIndex]` directly for a page: use `sourceOf(page)` /
+  `pdfPageOf(page)` (cache keys: plain index for the opened file, `<doc>:<index>` otherwise).
+- More element kinds: `AnnotElement` (geometry relative to x/y), `FieldElement` (new form field),
+  signatures are ImageElements. Form values: `useDoc.formValues` (undoable, autosave v4).
 - `RedactElement { x, y, width, height, text? }` (rotation always 0): a redaction mark, undoable like any
   element ("Mark all" is one step via `addElements`). `text` = what Find & redact / a tapped word marked;
   it is searched for again after applying. Clean-up options live in `session.sanitize` (autosave v3).
@@ -132,6 +148,12 @@ public/fonts/               bundled TTFs — Inter, Roboto, Tinos (Times-metric,
    `encodeGlyph`). Italic on a face without italics = synthetic oblique (shear 0.2), like browsers.
    Edited printed lines (`drawSourceLine`): same layout as the editor; original glyphs reuse the font
    dictionary (incl. non-embedded and Type3, for moved glyphs) with the same codes, stand-ins are embedded.
+0b. `assemblePages` first: a page of the opened file used twice is cloned (shared streams), blank pages
+   added, inserted pages copied after their links were rewritten to page indices (so the copier doesn't
+   drag in linked pages), then remapped; inserted outlines go under one item named after the file; their
+   fields join the AcroForm with clashing names renamed; added pages are labelled by position.
+4a. Annotations are written as real annotations with appearance streams; then `createFields` (flat
+   form fields) and `fillForm` (changed values only, /DA font if it covers the value, else bundled; flatten).
 4b. **Redaction** (marks present): `doc.flush()` first (so pdf-lib's own fonts have widths), then a second
    pass per marked page over the finished content (`redactPage`), annotations under marks removed
    (`removeAnnotations`: a widget takes its whole field), black boxes appended, marked strings scrubbed
@@ -141,6 +163,7 @@ public/fonts/               bundled TTFs — Inter, Roboto, Tinos (Times-metric,
    page labels rewritten per surviving page), `flush()`, `collectGarbage`, then optional
    `applySourceEncryption` (keep protection) — all in `lib/export/doc-structure.ts` / `keep-encryption.ts`.
    Redacted/cleaned exports run `findLeaks` after GC and before encryption; any problem or leak → no bytes.
+   Compress (before the page tree is rebuilt) resamples images in place by their largest drawn size.
 6. `save({ useObjectStreams: true, updateFieldAppearances: false })`. `npm run test:fidelity` checks it all
    (pikepdf/pypdf/PDFium/Ghostscript), including both passwords and the permissions.
 
@@ -243,6 +266,14 @@ public/fonts/               bundled TTFs — Inter, Roboto, Tinos (Times-metric,
   vertical writing, non-Identity CMaps, fonts without widths, nested forms, glyph not found.
   PDFium truncates fractional widths, so glyphs after a removed word may move ≤ n/1000 em there
   (agreed tolerance; exact in pdf.js/Acrobat/Preview). The editor still shows patches while editing.
+- Forms: the page canvas renders with pdf.js `ENABLE_FORMS` when the file has fields (the HTML inputs
+  show the values). pdf.js 6 `getFieldObjects()` returns a **Map**. pdf-lib radio groups built with
+  `/Opt` name their on-states by index (`/V /2` = Opt[2]); standard fonts silently drop non-WinAnsi
+  characters, so check `getCharacterSet()` before using one for an appearance.
+- Annotations: the Konva layer is a separate transparent canvas, so "multiply" there can't blend with
+  the page — highlights are 45 % opacity in the editor and Multiply @ ca 0.45 in the export (equal on
+  paper).
+- Signature fonts: the modified Dancing Script is renamed "Signature Script" (Reserved Font Name).
 - **Paragraph reflow** (Phase 5, `para-layout.ts`) — verified by `test:paragraphs`, don't regress:
   - A change inside one line that still fits (and frees no room for the next line's first word) is laid
     out exactly like a line edit; the other lines stay printed. Otherwise reflow from the first changed

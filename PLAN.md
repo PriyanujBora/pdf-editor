@@ -433,6 +433,13 @@ comments, and form data by choice.
 5. **Flat form → fillable.** Detect underlines and boxes from the captured paths, suggest fields, let the user adjust.
 6. **Compress.** Downsample images locally with a size preview.
 
+**As built** (`npm run test:forms`, `npm run test:everyday`):
+
+- Every item ships. Calculation scripts are kept but not run (the form panel says so).
+- Inserted PDFs must not be password-protected (the app says so).
+- Compress leaves CMYK, indexed, predictor and masked images as they are.
+- Duplicated pages share content streams (nothing edits streams in place).
+
 ### Phase 7 — Trust you can verify
 
 Offline indicator once the service worker has cached the app, "Built on this device in 1.2 s",
