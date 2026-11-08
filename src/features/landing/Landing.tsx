@@ -60,6 +60,20 @@ export function Landing() {
     [run],
   )
 
+  // While the landing page sits idle, warm up what opening a file needs: pdf.js + its worker and the
+  // editor's code (all local and lazily loaded; the landing bundle itself doesn't grow).
+  useEffect(() => {
+    const ric = (window as { requestIdleCallback?: (f: () => void, o?: { timeout: number }) => number }).requestIdleCallback ?? ((f: () => void) => setTimeout(f, 1200))
+    const id = ric(
+      () => {
+        void import('@/lib/pdf/pdfjs').then((m) => m.loadPdfJs())
+        void import('@/features/editor/Editor')
+      },
+      { timeout: 3000 },
+    )
+    return () => (window as { cancelIdleCallback?: (id: number) => void }).cancelIdleCallback?.(id as number)
+  }, [])
+
   // The whole window is a drop target.
   useEffect(() => {
     let depth = 0

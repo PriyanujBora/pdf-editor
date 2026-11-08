@@ -23,7 +23,9 @@
     "test:redaction": "node tests/redaction.mjs",
     "test:paragraphs": "node tests/paragraphs.mjs",
     "test:forms": "node tests/forms.mjs",
-    "test:everyday": "node tests/everyday.mjs"
+    "test:everyday": "node tests/everyday.mjs",
+    "fixtures:perf": "node tests/make-perf-fixtures.mjs",
+    "test:perf": "node tests/perf.mjs"
   },
   "dependencies": {
     "@cantoo/pdf-lib": "^2.11.1",

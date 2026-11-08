@@ -18,6 +18,7 @@ import { cn } from '@/lib/utils'
 import { undo, useDoc } from '@/store/document'
 import { useSession } from '@/store/session'
 import { addBlankPage, duplicatePage, pickPdfToInsert } from './page-actions'
+import { firstPaint } from './first-paint'
 import { isMainPage, sourceOf } from '@/lib/page-source'
 import { useUi } from '@/store/ui'
 import type { PageItem } from '@/types'
@@ -25,12 +26,24 @@ import { choose } from './choice'
 import { viewerBridge } from './viewer-bridge'
 
 const THUMB_W = 132
+/**
+ * Thumbnails render one at a time: each decodes its page in full (a scan page is tens of MB), and in
+ * between the pdf.js worker gets the chance to release what the last one used.
+ */
+let queue: Promise<unknown> = Promise.resolve()
+const enqueue = (job: () => Promise<void>) => {
+  const run = queue.then(job, job)
+  queue = run.catch(() => {})
+  return run
+}
+
 const thumbCache = new Map<string, string>()
 
 /** Small lazily-rendered page preview, cached per (source page, rotation). */
 const ThumbImage = memo(function ThumbImage({ page }: { page: PageItem }) {
   const ref = useRef<HTMLDivElement>(null)
   useSession((s) => s.docs)
+  useSession((s) => s.sourcePages)
   const src = sourceOf(page)
   const { pdf, info } = src
   const visible = useInView(ref, '[data-thumbs-scroll]', '200px 0px')
@@ -44,7 +57,9 @@ const ThumbImage = memo(function ThumbImage({ page }: { page: PageItem }) {
   useEffect(() => {
     if (thumbCache.has(key) || !visible || !pdf) return
     let alive = true
-    void (async () => {
+    void enqueue(async () => {
+      await Promise.race([firstPaint.promise, new Promise((r) => setTimeout(r, 3000))])
+      if (!alive) return
       const p = await pdf.getPage(src.index + 1)
       const scale = (THUMB_W * Math.min(2, devicePixelRatio || 1)) / w
       const vp = p.getViewport({ scale, rotation: rot })
@@ -52,12 +67,13 @@ const ThumbImage = memo(function ThumbImage({ page }: { page: PageItem }) {
       canvas.width = Math.ceil(vp.width)
       canvas.height = Math.ceil(vp.height)
       await p.render({ canvas, viewport: vp }).promise
+      p.cleanup()
       const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, 'image/webp', 0.8))
       if (!blob) return
       const u = URL.createObjectURL(blob)
       thumbCache.set(key, u)
       if (alive) setRendered({ key, url: u })
-    })().catch(() => {})
+    }).catch(() => {})
     return () => {
       alive = false
     }
@@ -173,6 +189,19 @@ function SortableThumb({
 
 export function Thumbnails({ className }: { className?: string }) {
   const pages = useDoc((s) => s.pages)
+  // Long documents: the first thumbnails now, the rest in idle chunks after the first page is drawn.
+  const [limit, setLimit] = useState(40)
+  useEffect(() => {
+    if (limit >= pages.length) return
+    let alive = true
+    void firstPaint.promise.then(() => {
+      const ric = (window as { requestIdleCallback?: (f: () => void, o?: { timeout: number }) => number }).requestIdleCallback ?? ((f: () => void) => setTimeout(f, 50))
+      ric(() => alive && setLimit((l) => l + 200), { timeout: 500 })
+    })
+    return () => {
+      alive = false
+    }
+  }, [limit, pages.length])
   const current = useUi((s) => s.currentPageId)
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
@@ -211,7 +240,7 @@ export function Thumbnails({ className }: { className?: string }) {
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
         <SortableContext items={pages.map((p) => p.id)} strategy={verticalListSortingStrategy}>
           <ol className="flex flex-col items-center gap-1 p-2" aria-label="Pages">
-            {pages.map((p, i) => (
+            {pages.slice(0, limit).map((p, i) => (
               <SortableThumb key={p.id} page={p} index={i} active={p.id === current} canDelete={pages.length > 1} />
             ))}
           </ol>

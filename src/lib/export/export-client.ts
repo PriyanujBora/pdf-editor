@@ -37,6 +37,8 @@ export async function exportPdf(
   onProgress?: (v: number) => void,
   opts: { keepEncryption?: boolean; forceRebuild?: boolean; pages?: PageItem[]; compress?: { dpi: number; quality: number } | null } = {},
 ): Promise<ExportResult> {
+  // Large files: page sizes may still be loading in the background.
+  await (await import('@/lib/open-document')).pageInfoReady
   const s = useSession.getState()
   const d0 = useDoc.getState()
   // Extract / split: the same export with a subset of the pages.

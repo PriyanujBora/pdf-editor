@@ -5,6 +5,7 @@ import { sourceOf } from '@/lib/page-source'
 import type { PageItem } from '@/types'
 import { loadPdfJs } from '@/lib/pdf/pdfjs'
 import { renderedCanvases } from './actions'
+import { firstPaint } from './first-paint'
 
 /** iOS Safari refuses canvases above ~16.7 MP. */
 const MAX_PIXELS = 16_000_000
@@ -55,8 +56,11 @@ export function PageCanvas({ pageId, page: item, rotation, zoom, width, height, 
           const { AnnotationMode } = await loadPdfJs()
           task = page.render({ canvas, viewport, annotationMode: forms ? AnnotationMode.ENABLE_FORMS : AnnotationMode.ENABLE })
           await task.promise
+          // Drop the page's decoded images (a 300 dpi scan page is ~35 MB): they come back when needed.
+          page.cleanup()
           if (cancelled || !holder.current) return
           holder.current.replaceChildren(canvas)
+          firstPaint.done()
           // Canvas pixels per point of the displayed (rotated) page.
           renderedCanvases.set(pageId, { canvas, scale: canvas.width / width })
         } catch (err) {

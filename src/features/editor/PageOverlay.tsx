@@ -87,11 +87,28 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
   const stageH = (rotated ? width : height) * zoom
   const gt = groupTransform(page.rotation, width, height, zoom)
 
-  // Existing text is editable straight from the Select tool too (tap a line),
-  // so detect it whenever a page is mounted with either tool active.
+  // Existing text is editable straight from the Select tool too (tap a line). Detection waits until
+  // the page has been on screen for a moment while the browser is idle (or the pointer comes over
+  // it): pages flying past while scrolling cost nothing (Phase 8).
   const textTools = tool === 'select' || tool === 'edit-text'
+  const [wanted, setWanted] = useState(false)
+  /** A tap that came before the page's text was detected: handled as soon as it is. */
+  const pendingTap = useRef<{ x: number; y: number; touch: boolean; alt: boolean } | null>(null)
   useEffect(() => {
-    if (!textTools || !pdf || blocks) return
+    if (wanted || !textTools) return
+    let idle = 0
+    const t = setTimeout(() => {
+      const ric = (window as { requestIdleCallback?: (f: () => void, o?: { timeout: number }) => number }).requestIdleCallback
+      if (ric) idle = ric(() => setWanted(true), { timeout: 1500 })
+      else setWanted(true)
+    }, tool === 'edit-text' ? 0 : 500)
+    return () => {
+      clearTimeout(t)
+      ;(window as { cancelIdleCallback?: (id: number) => void }).cancelIdleCallback?.(idle)
+    }
+  }, [wanted, textTools, tool])
+  useEffect(() => {
+    if (!textTools || !pdf || blocks || !wanted) return
     let alive = true
     void pdfPageOf(page).then((p) =>
       (p ? getTextBlocks(p, sourceOf(page).key) : Promise.resolve([] as TextBlock[])).then((b) => {
@@ -108,7 +125,16 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
     return () => {
       alive = false
     }
-  }, [textTools, pdf, page, page.id, blocks])
+  }, [textTools, pdf, page, page.id, blocks, wanted])
+
+  useEffect(() => {
+    const t = pendingTap.current
+    if (!blocks || !t) return
+    pendingTap.current = null
+    const b = blocks.find((x) => t.x >= x.x - 1 && t.x <= x.x + x.width + 1 && t.y >= x.y - 1 && t.y <= x.y + x.height + 1)
+    if (b) onBlockTap(b, t.touch, t.alt)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [blocks])
 
   // A no-text hint for scanned pages when switching to Edit text later.
   useEffect(() => {
@@ -174,6 +200,12 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
   const onStageTap = (e: KEvt) => {
     if (e.target !== e.target.getStage()) return
     const ui = useUi.getState()
+    if (!blocks && (ui.tool === 'select' || ui.tool === 'edit-text') && !ui.selectedId && !ui.editingId) {
+      const pos = groupRef.current?.getRelativePointerPosition()
+      if (pos) pendingTap.current = { ...pos, touch: e.type === 'tap', alt: 'altKey' in e.evt && !!(e.evt as MouseEvent).altKey }
+      setWanted(true)
+      return
+    }
     if (ui.tool === 'redact' || ui.tool === 'annotate') return // made on press/release (onRedactPress, onAnnotPress)
     if (ui.tool === 'sign') {
       const pos = groupRef.current?.getRelativePointerPosition()
@@ -445,6 +477,7 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
         onRedactPress(e)
         onAnnotPress(e)
       }}
+      onPointerEnter={() => setWanted(true)}
       style={{
         cursor: tool === 'text' ? 'text' : tool === 'redact' || tool === 'sign' || tool === 'annotate' ? 'crosshair' : 'default',
         // One finger draws marks with the Redact and Annotate tools (two fingers still zoom).

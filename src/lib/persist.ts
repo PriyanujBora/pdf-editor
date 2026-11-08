@@ -26,7 +26,7 @@ export interface SavedMeta {
   version: 1 | 2 | 3 | 4
 }
 
-export async function saveSource(fileName: string, bytes: Uint8Array) {
+export async function saveSource(fileName: string, bytes: Uint8Array | Blob) {
   // A new file: the previous session's inserted PDFs go.
   const old = (await keys(store)).filter((k) => String(k).startsWith('doc:'))
   await Promise.all(old.map((k) => del(k, store)))
@@ -60,13 +60,15 @@ export async function loadInsertedDoc(id: string) {
 
 export async function loadSaved() {
   const [bytes, fileName, meta, assets] = await Promise.all([
-    get<Uint8Array>('pdf', store),
+    get<Uint8Array | Blob>('pdf', store),
     get<string>('fileName', store),
     get<SavedMeta | null>('meta', store),
     get<Record<string, ImageAsset>>('assets', store),
   ])
   if (!bytes || !fileName) return null
-  return { bytes, fileName, meta: meta ?? null, assets: assets ?? {} }
+  // Saved as the picked file (a Blob) since Phase 8; older saves hold the bytes.
+  const data = bytes instanceof Blob ? new Uint8Array(await bytes.arrayBuffer()) : bytes
+  return { bytes: data, fileName, meta: meta ?? null, assets: assets ?? {} }
 }
 
 export async function peekSavedName(): Promise<string | null> {

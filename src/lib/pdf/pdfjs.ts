@@ -2,13 +2,75 @@ import type * as PdfJs from 'pdfjs-dist'
 
 let loading: Promise<typeof PdfJs> | null = null
 
-/** Lazily loads pdf.js and its worker — neither is in the initial bundle. */
+/**
+ * Lazily loads pdf.js and starts its worker — neither is in the initial bundle. The worker is one
+ * long-lived port shared by every document (pdf.js never tears down a port it was given), so it is
+ * started once — ideally while the landing page is idle — and every open after that is warm.
+ */
 export function loadPdfJs(): Promise<typeof PdfJs> {
   loading ??= Promise.all([import('pdfjs-dist'), import('pdfjs-dist/build/pdf.worker.min.mjs?url')]).then(([lib, worker]) => {
     lib.GlobalWorkerOptions.workerSrc = worker.default
+    try {
+      lib.GlobalWorkerOptions.workerPort = new Worker(worker.default, { type: 'module' })
+    } catch {
+      /* falls back to pdf.js creating its own worker per document */
+    }
     return lib
   })
   return loading
+}
+
+/**
+ * pdf.js keeps decoded page data in its worker until the document is cleaned up (a 150 MB scan holds
+ * ~600 MB after a scroll through it). Every page call of the document is counted; once nothing has
+ * been in flight for a while, `cleanup(true)` releases it (loaded fonts stay: the editor draws with
+ * them). pdf.js forbids cleaning up while a page renders, hence the counting.
+ */
+export function cleanupWhenIdle(pdf: PdfJs.PDFDocumentProxy, idleMs = 2500) {
+  let active = 0
+  let renders = 0
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const settle = () => {
+    clearTimeout(timer)
+    if (active) return
+    // While scrolling through big pages nothing is ever idle for long: after a few renders, clean up
+    // at the next quiet moment instead.
+    timer = setTimeout(
+      () => {
+        if (active) return
+        renders = 0
+        void pdf.cleanup(true).catch(() => {})
+      },
+      renders >= 6 ? 0 : idleMs,
+    )
+  }
+  const track = <T>(p: Promise<T>): Promise<T> => {
+    active++
+    clearTimeout(timer)
+    return p.finally(() => {
+      active--
+      settle()
+    })
+  }
+  const getPage = pdf.getPage.bind(pdf)
+  const wrapped = new WeakSet<object>()
+  pdf.getPage = (n: number) =>
+    track(getPage(n)).then((page) => {
+      if (wrapped.has(page)) return page
+      wrapped.add(page)
+      const render = page.render.bind(page)
+      page.render = (params) => {
+        const task = render(params)
+        renders++
+        void track(task.promise).catch(() => {})
+        return task
+      }
+      for (const m of ['getOperatorList', 'getTextContent', 'getAnnotations'] as const) {
+        const orig = (page[m] as (...a: unknown[]) => Promise<unknown>).bind(page)
+        ;(page as unknown as Record<string, unknown>)[m] = (...a: unknown[]) => track(orig(...a))
+      }
+      return page
+    })
 }
 
 const base = import.meta.env.BASE_URL

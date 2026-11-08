@@ -1,4 +1,4 @@
-import { classifyError, loadPdfJs, PDFJS_ASSET_OPTIONS, type OpenError } from '@/lib/pdf/pdfjs'
+import { classifyError, cleanupWhenIdle, loadPdfJs, PDFJS_ASSET_OPTIONS, type OpenError } from '@/lib/pdf/pdfjs'
 import { clearSaved, loadSaved, saveSource, saveState } from '@/lib/persist'
 import { uid } from '@/lib/ids'
 import { clearHistory, useDoc } from '@/store/document'
@@ -19,6 +19,8 @@ export class OpenFailure extends Error {
 
 interface OpenOptions {
   password?: string
+  /** The picked file: autosaved as a Blob (no extra copy of its bytes in memory). */
+  file?: Blob
   /** When resuming an autosaved session. */
   restore?: {
     pages: PageItem[] | null
@@ -38,6 +40,8 @@ export async function openDocument(bytes: Uint8Array, fileName: string, opts: Op
   const session = useSession.getState()
   const prev = session.pdf
   session.set({ status: 'loading', progress: 0, docs: {} })
+  // The editor's code loads while pdf.js parses the file (Phase 8: first page sooner).
+  void import('@/features/editor/Editor')
 
   try {
     const pdfjs = await loadPdfJs()
@@ -50,30 +54,27 @@ export async function openDocument(bytes: Uint8Array, fileName: string, opts: Op
       enableXfa: false,
     })
     const pdf = await task.promise
+    cleanupWhenIdle(pdf)
 
+    // Page sizes: the first batch before the editor opens, the rest in the background (large files
+    // open as fast as small ones). Until a page's size is known it borrows the first page's.
     const sourcePages: SourcePageInfo[] = new Array(pdf.numPages)
-    let done = 0
     const BATCH = 16
-    for (let start = 1; start <= pdf.numPages; start += BATCH) {
-      const end = Math.min(pdf.numPages, start + BATCH - 1)
-      const jobs: Promise<void>[] = []
-      for (let n = start; n <= end; n++) {
-        jobs.push(
-          pdf.getPage(n).then((page) => {
-            const vp = page.getViewport({ scale: 1 })
-            sourcePages[n - 1] = {
-              view: page.view as [number, number, number, number],
-              rotate: (((page.rotate % 360) + 360) % 360) as Rotation,
-              width: vp.width,
-              height: vp.height,
-            }
-            done++
-          }),
-        )
+    const infoOf = async (n: number) => {
+      const page = await pdf.getPage(n)
+      const vp = page.getViewport({ scale: 1 })
+      return {
+        view: page.view as [number, number, number, number],
+        rotate: (((page.rotate % 360) + 360) % 360) as Rotation,
+        width: vp.width,
+        height: vp.height,
       }
-      await Promise.all(jobs)
-      useSession.getState().set({ progress: done / pdf.numPages })
     }
+    const first = Math.min(pdf.numPages, BATCH)
+    const head = await Promise.all(Array.from({ length: first }, (_, i) => infoOf(i + 1)))
+    head.forEach((info, i) => (sourcePages[i] = info))
+    for (let i = first; i < pdf.numPages; i++) sourcePages[i] = { ...head[0] }
+    useSession.getState().set({ progress: first / pdf.numPages })
 
     const restored = opts.restore
     let pages: PageItem[] =
@@ -92,12 +93,10 @@ export async function openDocument(bytes: Uint8Array, fileName: string, opts: Op
       import('@/lib/forms').then((m) => m.clearFormCache()),
     ])
     const encrypted = !!opts.password || (await pdf.getPermissions().catch(() => null)) !== null
-    const bookmarks = await bookmarksByPage(pdf).catch(() => ({}))
-    const form = await formInfo(pdf).catch(() => ({ fields: 0, calculated: false }))
     useSession.getState().set({
       status: 'ready',
       encrypted,
-      bookmarks,
+      bookmarks: {},
       progress: 1,
       fileName,
       bytes,
@@ -106,8 +105,28 @@ export async function openDocument(bytes: Uint8Array, fileName: string, opts: Op
       sourcePages,
       assets: restored?.assets ?? {},
       sanitize: { ...NO_SANITIZE, ...restored?.sanitize },
-      form: { ...form, flatten: false },
+      form: { fields: 0, calculated: false, flatten: false },
     })
+    // The rest of the page sizes, then bookmarks and form fields — none of it delays the first page.
+    pageInfoReady = (async () => {
+      for (let start = first + 1; start <= pdf.numPages; start += BATCH) {
+        const end = Math.min(pdf.numPages, start + BATCH - 1)
+        const infos = await Promise.all(Array.from({ length: end - start + 1 }, (_, k) => infoOf(start + k)))
+        if (useSession.getState().pdf !== pdf) return
+        // Only a new array when a size really differs from the stand-in (avoids re-laying out).
+        const changed = infos.some((inf, k) => {
+          const cur = sourcePages[start - 1 + k]
+          return cur.width !== inf.width || cur.height !== inf.height || cur.rotate !== inf.rotate || cur.view.some((v, j) => v !== inf.view[j])
+        })
+        infos.forEach((inf, k) => (sourcePages[start - 1 + k] = inf))
+        if (changed) useSession.getState().set({ sourcePages: sourcePages.slice() })
+      }
+    })().catch(() => {})
+    void (async () => {
+      const [bookmarks, form] = await Promise.all([bookmarksByPage(pdf).catch(() => ({})), formInfo(pdf).catch(() => ({ fields: 0, calculated: false }))])
+      if (useSession.getState().pdf !== pdf) return
+      useSession.getState().set({ bookmarks, form: { ...useSession.getState().form, ...form } })
+    })()
     // Inserted PDFs of a resumed session; pages of any that can't be read again are dropped.
     if (restored?.docs?.length) {
       const { openInserted } = await import('@/features/editor/page-actions')
@@ -123,13 +142,17 @@ export async function openDocument(bytes: Uint8Array, fileName: string, opts: Op
     clearHistory()
     useUi.getState().set({ selectedId: null, editingId: null, tool: 'select', currentPageId: pages[0]?.id ?? null })
 
-    if (!restored) await saveSource(fileName, bytes).catch(() => {})
+    // The autosave copy is written once the first pages have had their turn.
+    if (!restored) setTimeout(() => void saveSource(fileName, opts.file ?? bytes).catch(() => {}), 1500)
   } catch (err) {
     useSession.getState().set({ status: prev ? 'ready' : 'empty', progress: 0 })
     if (err instanceof OpenFailure) throw err
     throw new OpenFailure(classifyError(err))
   }
 }
+
+/** Resolves when every page's size is known (exports wait for it). */
+export let pageInfoReady: Promise<void> = Promise.resolve()
 
 /** Bookmark titles per page they point to (pdf.js outline + destinations). */
 async function bookmarksByPage(pdf: Awaited<ReturnType<Awaited<ReturnType<typeof loadPdfJs>>['getDocument']>['promise']>) {
@@ -172,7 +195,7 @@ export async function openFile(file: File, password?: string) {
     })
   }
   const bytes = new Uint8Array(await file.arrayBuffer())
-  return openDocument(bytes, file.name, { password })
+  return openDocument(bytes, file.name, { password, file })
 }
 
 export async function resumeSaved(password?: string) {

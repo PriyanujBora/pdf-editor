@@ -16,6 +16,7 @@ import {
   PDFOperator,
   PDFOperatorNames,
   PDFRef,
+  PDFStreamWriter,
   popGraphicsState,
   pushGraphicsState,
   rgb,
@@ -108,6 +109,8 @@ async function buildPdf(req: ExportRequest, notes: RemovalNote[], out: { redacti
     const info = req.infos[i]
     const page = pageOf[i]
     const els = req.elements.filter((el) => el.pageId === item.id)
+    // Progress for every page (not only edited ones), at most ~100 updates.
+    if (i % Math.max(1, Math.floor(req.pages.length / 100)) === 0) progress(0.15 + (0.55 * i) / req.pages.length)
     if ((info.rotate + item.rotation) % 360 !== ((page.getRotation().angle % 360) + 360) % 360)
       page.setRotation(degrees((info.rotate + item.rotation) % 360))
     if (!els.length) continue
@@ -207,7 +210,7 @@ async function buildPdf(req: ExportRequest, notes: RemovalNote[], out: { redacti
       } else if (el.kind === 'image') await drawImage(page, toPdf, el, req, images, doc)
       else if (el.kind === 'annot') addAnnotation(page, toPdf, el)
     }
-    progress(0.15 + (0.6 * (i + 1)) / req.pages.length)
+    progress(0.15 + (0.55 * (i + 1)) / req.pages.length)
   }
 
   // New fields on flat forms, then form values (Phase 6) — before redaction, so fields under a mark
@@ -280,9 +283,12 @@ async function buildPdf(req: ExportRequest, notes: RemovalNote[], out: { redacti
 
   // Page order, deleted pages and everything that pointed at them; then drop unreachable objects
   // (deleted pages, replaced streams, superseded revisions) so they don't ship in the file.
+  progress(0.72)
   rebuildPageTree(doc, pages, order)
   pruneDeletedPages(doc, pages, order, mainCount)
+  progress(0.76)
   await doc.flush()
+  progress(0.8)
   collectGarbage(doc.context)
   if (marks.length || Object.values(req.sanitize).some(Boolean)) {
     report.leaks = findLeaks(doc, kept, markedPages, marks.flatMap((m) => (m.text ? [m.text] : [])))
@@ -293,7 +299,26 @@ async function buildPdf(req: ExportRequest, notes: RemovalNote[], out: { redacti
   if (enc) applySourceEncryption(doc, enc)
   progress(0.85)
 
-  const bytes = await doc.save({ useObjectStreams: true, updateFieldAppearances: false, addDefaultPage: false })
+  // Writing a big file takes a while: report progress from pdf-lib's own writer as objects go out.
+  const total = Math.max(1, doc.context.largestObjectNumber)
+  const forContext = PDFStreamWriter.forContext
+  PDFStreamWriter.forContext = ((...args: Parameters<typeof forContext>) => {
+    const w = forContext.apply(PDFStreamWriter, args) as unknown as { shouldWaitForTick: (n: number) => boolean }
+    const tick = w.shouldWaitForTick
+    let n = 0
+    w.shouldWaitForTick = (k: number) => {
+      n += k
+      if (n % 250 < k) progress(0.85 + 0.14 * Math.min(1, n / total))
+      return tick(k)
+    }
+    return w
+  }) as unknown as typeof forContext
+  let bytes: Uint8Array
+  try {
+    bytes = await doc.save({ useObjectStreams: true, updateFieldAppearances: false, addDefaultPage: false })
+  } finally {
+    PDFStreamWriter.forContext = forContext
+  }
   progress(1)
   return bytes
 }

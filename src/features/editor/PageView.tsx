@@ -21,6 +21,7 @@ export const PageView = memo(function PageView({ page, index, zoom }: Props) {
   const ref = useRef<HTMLDivElement>(null)
   // Re-read when inserted documents change.
   useSession((s) => s.docs)
+  useSession((s) => s.sourcePages)
   const info = sourceOf(page).info
   const visible = useInView(ref, '[data-testid="viewer"]', '150% 150%')
   const editingId = useUi((s) => s.editingId)

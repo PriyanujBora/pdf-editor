@@ -2,7 +2,7 @@ import { toast } from 'sonner'
 import { downloadBytes, exportPdf } from '@/lib/export/export-client'
 import { uid } from '@/lib/ids'
 import { sourceOf } from '@/lib/page-source'
-import { loadPdfJs, PDFJS_ASSET_OPTIONS } from '@/lib/pdf/pdfjs'
+import { cleanupWhenIdle, loadPdfJs, PDFJS_ASSET_OPTIONS } from '@/lib/pdf/pdfjs'
 import { saveInsertedDoc } from '@/lib/persist'
 import { useDoc } from '@/store/document'
 import { useSession } from '@/store/session'
@@ -31,6 +31,7 @@ export async function readPageInfos(pdf: { numPages: number; getPage: (n: number
 export async function openInserted(id: string, name: string, bytes: Uint8Array) {
   const pdfjs = await loadPdfJs()
   const pdf = await pdfjs.getDocument({ data: bytes.slice(), ...PDFJS_ASSET_OPTIONS, fontExtraProperties: true, enableXfa: false }).promise
+  cleanupWhenIdle(pdf)
   const sourcePages = await readPageInfos(pdf)
   useSession.setState((s) => ({ docs: { ...s.docs, [id]: { name, bytes, pdf, sourcePages } } }))
   return sourcePages

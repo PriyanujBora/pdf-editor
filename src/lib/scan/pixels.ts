@@ -116,6 +116,8 @@ export async function scanPixels(
 ): Promise<RegionPixels> {
   const im = pageImage(key)
   const m = im && imageToPage(info, im.ctm, im.width, im.height)
+  // Renders release decoded images (page.cleanup); a fresh operator list brings this one back.
+  if (im && m && !decoded.has(im.objId)) await page.getOperatorList().catch(() => {})
   const canvas = im && m ? await imageCanvas(page, im.objId) : null
   if (im && m && canvas) {
     const eps = 1e-6
