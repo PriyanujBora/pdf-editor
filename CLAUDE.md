@@ -206,9 +206,19 @@ public/fonts/               bundled TTFs — Inter, Roboto, Tinos (Times-metric,
   catalog, page dicts and stream dicts out of object streams, so their strings are encrypted by us.
 - Glyph capture uses `getOperatorList({ annotationMode: DISABLE })`: annotation appearances (form values,
   stamps) are not page text.
-- Edited text is **covered, not erased** (until Phase 3, see PLAN.md): changed/moved words get a patch in
-  the sampled page colour; the original glyphs stay in the content stream (copy/search still finds them).
-  The panel says so.
+- **Edited text is removed, not covered** (`lib/content/remove-text.ts`, export worker only): the page
+  content is tokenized with byte spans; text state + CTM are tracked (Form XObjects too) to find each
+  printed glyph the layout no longer keeps (matched by char code + page-space origin within 0.6 pt);
+  those glyphs become TJ adjustments of their advance, n = −(w0·1000 + (Tc+Tw')·1000/Tfs), so nothing
+  else moves; /ActualText//Alt//E around them is dropped; a form that needs edits is cloned per page.
+  The new text is spliced in right after the text object it replaces (reading order, same tagged span),
+  under the inverse of the CTM there — unless a clip there could cut it (then appended). The rewritten
+  content is wrapped in q…Q and /Contents stays an array (pdf-lib appends to it later). Scan edits remove
+  the old OCR words (Tr 3) under the line; legacy patches remove what's under them.
+  Fallback (patch + toast + panel warning that the old text is still in the file): clip text (Tr ≥ 4),
+  vertical writing, non-Identity CMaps, fonts without widths, nested forms, glyph not found.
+  PDFium truncates fractional widths, so glyphs after a removed word may move ≤ n/1000 em there
+  (agreed tolerance; exact in pdf.js/Acrobat/Preview). The editor still shows patches while editing.
 
 ## Workflow
 

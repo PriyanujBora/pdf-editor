@@ -6,6 +6,8 @@
 //   4. insert a character the PDF's font lacks (₹) → words before it untouched, words after it move by
 //      one constant offset with their own font, only the ₹ uses a stand-in
 //   5. size: glyph heights of new/moved glyphs within 2 % of the originals
+//   6. removed: in the export, the edited line's text no longer contains the old word (it was removed
+//      from the content stream, not just covered) and does contain the new one
 // Needs the dev server (`npm run dev -- --port 5199`) and the PDF tools venv (tests/tools/README.md).
 // Run: npm run test:edit-stability [-- file-filter]
 import { execFileSync } from 'node:child_process'
@@ -130,7 +132,7 @@ for (const file of files) {
       const gi = b.charGlyph.slice(w.index, w.index + w[0].length).filter((g) => g >= 0)
       const x0 = Math.min(...gi.map((g) => b.glyphs[g][0]))
       const x1 = Math.max(...gi.map((g) => b.glyphs[g][0] + b.glyphs[g][1]))
-      c3.push({ i, box: b.box, baseline: b.baseline, word: { x0, x1 }, n: [...w[0]].length })
+      c3.push({ i, box: b.box, baseline: b.baseline, word: { x0, x1 }, n: [...w[0]].length, old: w[0], new: rev })
     } catch (err) {
       c3.push({ i, error: err.message.split('\n')[0] })
     }

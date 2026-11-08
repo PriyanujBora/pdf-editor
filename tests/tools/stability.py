@@ -3,8 +3,10 @@ Prints pass rates per check and file, and "RESULT PASS|FAIL": generated fixtures
 everything, corpus files at least 95 % of lines per check."""
 import ctypes
 import json
+import re
 import os
 import sys
+import warnings
 
 import numpy as np
 import pypdf
@@ -57,7 +59,7 @@ def diff_count(a, b, x0, x1, y0, y1):
 def score(spec_path):
     spec = json.load(open(spec_path, encoding='utf-8'))
     d = spec['dir']
-    res = {k: [0, 0] for k in ('1 no-op', '2 editing', '3 same-length', '4 missing glyph', '5 size')}
+    res = {k: [0, 0] for k in ('1 no-op', '2 editing', '3 same-length', '4 missing glyph', '5 size', '6 removed')}
     fails = {k: [] for k in res}
 
     def mark(k, ok, i, why=''):
@@ -87,6 +89,10 @@ def score(spec_path):
     n_orig = len(oc)
     if os.path.exists(f'{d}/c3.pdf'):
         e3 = render(f'{d}/c3.pdf')
+        # Keep the document alive while its page/text page are used (pypdfium2 lifetimes).
+        c3_doc = pdfium.PdfDocument(f'{d}/c3.pdf')
+        c3_page = c3_doc[0]
+        c3_text = c3_page.get_textpage()
         ec = chars(f'{d}/c3.pdf')
         for t in spec['c3']:
             i = t['i']
@@ -100,14 +106,66 @@ def score(spec_path):
             y0, y1 = max(bx['y'] - 0.5, t['baseline'] - 0.8 * em), min(bx['y'] + bx['height'] + 0.5, t['baseline'] + 0.25 * em)
             left = diff_count(orig, e3, bx['x'] - 1, w['x0'] - 1, y0, y1)
             right = diff_count(orig, e3, w['x1'] + 1, bx['x'] + bx['width'] + 1, y0, y1)
-            mark('3 same-length', left == 0 and right == 0, i, f'{left}+{right} px changed outside the word')
+            ok3 = left == 0 and right == 0
+            why3 = f'{left}+{right} px changed outside the word'
+            if not ok3:
+                # Agreed tolerance (PLAN decision 2): fonts with fractional widths may shift the glyphs
+                # around a removed word by <= 0.05 pt in PDFium (it truncates widths); nothing else.
+                tol3 = 0.3 * bx['height']
+                inbox = lambda c: bx['x'] - 1 <= c[1] <= bx['x'] + bx['width'] + 1 and not (w['x0'] - 0.6 <= c[1] <= w['x1'] + 0.6)
+                ko = [c for c in on_line(oc, t['baseline'], tol3) if inbox(c)]
+                ke = [c for c in on_line(ec, t['baseline'], tol3) if inbox(c)]
+                if len(ko) == len(ke) and ko:
+                    shift = max(max(abs(a[1] - b[1]), abs(a[2] - b[2])) for a, b in zip(sorted(ko, key=lambda c: c[1]), sorted(ke, key=lambda c: c[1])))
+                    # PDFium truncates each fractional width by < 1/1000 em: the removed word can
+                    # shift what follows by at most n/1000 em (agreed: tolerate that, >= 0.05 pt).
+                    bound = max(0.05, t['n'] * 0.8 * bx['height'] / 1000 + 0.005)
+                    if shift <= bound:
+                        ok3 = True
+                    why3 += f'; glyphs outside moved {shift:.3f} pt (bound {bound:.3f})'
+            mark('3 same-length', ok3, i, why3)
+            # 6: the old word is gone from the file's text on this line, the new one is there.
+            if t.get('old'):
+                H = c3_page.get_size()[1]
+                txt = c3_text.get_text_bounded(left=bx['x'] - 1, bottom=H - (bx['y'] + bx['height']) - 0.5, right=bx['x'] + bx['width'] + 1, top=H - bx['y'] + 0.5)
+                flat = re.sub(r'\s+', '', txt)
+                mark('6 removed', t['old'] not in flat and t['new'] in flat, i, f'old {t["old"]!r} in text: {t["old"] in flat}; new present: {t["new"] in flat}')
             tol = 0.3 * bx['height']
-            new = [c for c in on_line(ec[n_orig:], t['baseline'], tol) if w['x0'] - 0.6 <= c[1] <= w['x1'] + 0.6]
-            new = new[-len([c for c in on_line(oc, t['baseline'], tol) if w['x0'] - 0.6 <= c[1] <= w['x1'] + 0.6]):] if new else new
+            new = [c for c in on_line(ec, t['baseline'], tol) if w['x0'] - 0.6 <= c[1] <= w['x1'] + 0.6]
             old = [c for c in on_line(oc, t['baseline'], tol) if w['x0'] - 0.6 <= c[1] <= w['x1'] + 0.6]
             hs = [n[4] / o[4] for o, n in zip(sorted(old, key=lambda c: c[0]), sorted(new, key=lambda c: c[0])) if o[0] == n[0] and o[4] > 0.5 and o[3] and n[3]]
             if hs:
                 mark('5 size', 0.98 <= float(np.median(hs)) <= 1.02, i, f'height ratio {np.median(hs)}')
+    # 6 (whole page, other extractors): every edited copy of an old word is gone for pdftotext and
+    # pypdf too — the page text has that many fewer occurrences (word counts, not substrings).
+    if os.path.exists(f'{d}/c3.pdf'):
+        import collections
+        import subprocess
+        edited = collections.Counter(t['old'] for t in spec['c3'] if t.get('old'))
+
+        def words(path, tool):
+            if tool == 'pdftotext':
+                txt = subprocess.run(['pdftotext', '-f', '1', '-l', '1', path, '-'], capture_output=True).stdout.decode('utf-8', 'replace')
+            else:
+                with warnings.catch_warnings():
+                    warnings.simplefilter('ignore')
+                    txt = pypdf.PdfReader(path).pages[0].extract_text()
+            return collections.Counter(re.findall(r'[\w’\'-]+', txt))
+
+        for tool in ('pdftotext', 'pypdf'):
+            try:
+                before, after = words(spec['file'], tool), words(f'{d}/c3.pdf', tool)
+            except Exception as e:
+                mark('6 removed', False, 0, f'{tool}: {e}')
+                continue
+            for word, n in edited.items():
+                if before[word] == 0:
+                    continue  # this extractor never saw the word (e.g. Xpdf and some scripts)
+                ok = after[word] <= max(0, before[word] - n)
+                res['6 removed'][1] += 1
+                res['6 removed'][0] += ok
+                if not ok:
+                    fails['6 removed'].append(f'{tool}: {word!r} {before[word]} -> {after[word]} after {n} edit(s)')
     if os.path.exists(f'{d}/c4.pdf'):
         e4 = render(f'{d}/c4.pdf')
         ec = chars(f'{d}/c4.pdf')
@@ -125,7 +183,7 @@ def score(spec_path):
             tol = 0.3 * bx['height']
             right = bx['x'] + bx['width']
             old = [c for c in on_line(oc, t['baseline'], tol) if t['insertX'] - 0.05 <= c[1] <= right]
-            moved = [c for c in on_line(ec[n_orig:], t['baseline'], tol) if c[0] != '₹' and t['insertX'] - 0.05 <= c[1] <= right + 20]
+            moved = [c for c in on_line(ec, t['baseline'], tol) if c[0] != '₹' and t['insertX'] - 0.05 <= c[1] <= right + 20]
             if False:
                 # Justified: later words move back towards their place (right edge kept), so offsets
                 # shrink along the line; check font, no vertical drift, and that nothing jumps.

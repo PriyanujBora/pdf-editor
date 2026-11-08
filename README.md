@@ -42,5 +42,6 @@ npx wrangler deploy
 - Fonts bundled for editing/export: Inter, Roboto, Noto Serif, Noto Sans Bengali, Noto Sans Devanagari
   (SIL Open Font License). Original fonts in PDFs are usually subsets, so edited text uses the closest
   bundled family at the original size and colour.
-- Edited existing text is covered with a patch of the sampled background colour; the original text is
-  hidden, not erased from the file.
+- Edited existing text is really removed from the downloaded file: the old words are taken out of the
+  page's content stream, so copying, searching and text extraction no longer find them. Only when that's
+  impossible (rare fonts, text used as a clip) is the old text covered instead, and the app says so.
