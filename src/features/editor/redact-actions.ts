@@ -2,7 +2,7 @@ import { toast } from 'sonner'
 import { uid } from '@/lib/ids'
 import { compile, findInLines, searchLines, wordAt, type Match, type Query } from '@/lib/redact/find'
 import { useDoc } from '@/store/document'
-import { useSession } from '@/store/session'
+import { pdfPageOf, sourceOf } from '@/lib/page-source'
 import { useUi } from '@/store/ui'
 import type { PageItem, PtRect, RedactElement } from '@/types'
 
@@ -10,9 +10,7 @@ import type { PageItem, PtRect, RedactElement } from '@/types'
 export const MIN_MARK = 3
 
 function pageLines(page: PageItem) {
-  const pdf = useSession.getState().pdf
-  if (!pdf) return Promise.resolve([])
-  return pdf.getPage(page.srcIndex + 1).then((p) => searchLines(p, String(page.srcIndex)))
+  return pdfPageOf(page).then((p) => (p ? searchLines(p, sourceOf(page).key) : []))
 }
 
 const sameRect = (a: PtRect, b: PtRect) =>

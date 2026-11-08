@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ensureFontLoaded } from '@/lib/fonts'
 import { useDoc } from '@/store/document'
-import { useSession } from '@/store/session'
+import { sourceOf } from '@/lib/page-source'
 import type { TextElement } from '@/types'
 import { applyCurve, colSpan, cssFace, splitWords } from './fit'
 import { blur, clipRows, dilate, hashString, lineBand, measure, mulberry32, renderRuns, type Plane } from './raster'
@@ -49,12 +49,12 @@ const patches = new Map<string, HTMLCanvasElement>()
 const sourceKey = (el: ScanText) => `${el.id}|${JSON.stringify(el.scan)}`
 
 async function buildSource(el: ScanText): Promise<Source> {
-  const { pdf, sourcePages } = useSession.getState()
   const page = useDoc.getState().pages.find((p) => p.id === el.pageId)
-  if (!pdf || !page) throw new Error('page not available')
-  const info = sourcePages[page.srcIndex]
+  const src = page ? sourceOf(page) : null
+  if (!page || !src?.pdf) throw new Error('page not available')
+  const info = src.info
   const s = el.scan
-  const img = (await scanPixels(await pdf.getPage(page.srcIndex + 1), page.srcIndex, info, s.region, s.scale)).img
+  const img = (await scanPixels(await src.pdf.getPage(src.index + 1), src.key, info, s.region, s.scale)).img
   const { width: w, height: h } = img
   const an = analyze(img, 0, w)
   const T = an.target

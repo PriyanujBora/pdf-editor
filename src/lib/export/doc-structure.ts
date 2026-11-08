@@ -213,8 +213,8 @@ function pruneField(c: Ctx, field: PDFDict, deadAnnots: Set<PDFRef>, self?: PDFR
   return !((self && deadAnnots.has(self)) || (p && c.gone.has(p)))
 }
 
-/** Page labels: every surviving page keeps the label it had. */
-function relabel(c: Ctx, catalog: PDFDict, order: number[]) {
+/** Page labels: every surviving page keeps the label it had; added pages are numbered by position. */
+function relabel(c: Ctx, catalog: PDFDict, order: number[], mainCount = Infinity) {
   const labels = c.ctx.lookupMaybe(catalog.get(N('PageLabels')), PDFDict)
   if (!labels) return
   const ranges: { start: number; dict: PDFDict }[] = []
@@ -231,7 +231,13 @@ function relabel(c: Ctx, catalog: PDFDict, order: number[]) {
   }
   const nums: PDFObject[] = []
   let prev: { r: (typeof ranges)[number]; i: number } | null = null
+  const ADDED = { start: -1, dict: c.ctx.obj({}) as PDFDict }
   order.forEach((src, j) => {
+    if (src >= mainCount) {
+      if (!(prev && prev.r === ADDED && src === prev.i + 1)) nums.push(PDFNumber.of(j), c.ctx.obj({ S: 'D', St: j + 1 }))
+      prev = { r: ADDED, i: src }
+      return
+    }
     const r = rangeOf(src)
     if (!r) return
     if (prev && prev.r === r && src === prev.i + 1) {
@@ -256,14 +262,14 @@ function relabel(c: Ctx, catalog: PDFDict, order: number[]) {
  * drops what nothing points to): outline items, named destinations, links, tags, form fields,
  * the open action; page labels are rewritten for the new order.
  */
-export function pruneDeletedPages(doc: PDFDocument, pages: PDFPage[], order: number[]) {
+export function pruneDeletedPages(doc: PDFDocument, pages: PDFPage[], order: number[], mainCount = pages.length) {
   const ctx = doc.context
   const keepSet = new Set(order)
   const gone = new Set(pages.filter((_, i) => !keepSet.has(i)).map((p) => p.ref))
   const c: Ctx = { ctx, gone, named: new Map() }
   const catalog = doc.catalog
   collectNamed(c, catalog)
-  relabel(c, catalog, order)
+  relabel(c, catalog, order, mainCount)
   if (!gone.size) return
 
   const outlines = ctx.lookupMaybe(catalog.get(N('Outlines')), PDFDict)

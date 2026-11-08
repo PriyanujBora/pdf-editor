@@ -7,6 +7,7 @@ import { isCoarsePointer } from '@/hooks/use-media-query'
 import { primeKeyboard } from '@/lib/keyboard'
 import { getTextBlocks, type TextBlock } from '@/lib/pdf/text-blocks'
 import { useDoc } from '@/store/document'
+import { pdfPageOf, sourceOf } from '@/lib/page-source'
 import { useSession } from '@/store/session'
 import { useUi } from '@/store/ui'
 import type { AnnotElement, EditorElement, PageItem, PtRect } from '@/types'
@@ -91,8 +92,8 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
   useEffect(() => {
     if (!textTools || !pdf || blocks) return
     let alive = true
-    void pdf.getPage(page.srcIndex + 1).then((p) =>
-      getTextBlocks(p, String(page.srcIndex)).then((b) => {
+    void pdfPageOf(page).then((p) =>
+      (p ? getTextBlocks(p, sourceOf(page).key) : Promise.resolve([] as TextBlock[])).then((b) => {
         if (!alive) return
         setBlocks(b)
         if (!b.length && useUi.getState().tool === 'edit-text' && useUi.getState().currentPageId === page.id) {
@@ -106,7 +107,7 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
     return () => {
       alive = false
     }
-  }, [textTools, pdf, page.srcIndex, page.id, blocks])
+  }, [textTools, pdf, page, page.id, blocks])
 
   // A no-text hint for scanned pages when switching to Edit text later.
   useEffect(() => {
@@ -241,14 +242,13 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
   useEffect(() => {
     if (tool !== 'annotate' || !pdf || lines) return
     let alive = true
-    void pdf
-      .getPage(page.srcIndex + 1)
-      .then((p) => searchLines(p, String(page.srcIndex)))
+    void pdfPageOf(page)
+      .then((p) => (p ? searchLines(p, sourceOf(page).key) : []))
       .then((l) => alive && setLines(l))
     return () => {
       alive = false
     }
-  }, [tool, pdf, page.srcIndex, lines])
+  }, [tool, pdf, page, lines])
 
   /** Annotate tool: drag across text to mark it up (a tap marks a word); draw ink, rectangles, arrows; tap for a note. */
   const onAnnotPress = (e: Konva.KonvaEventObject<PointerEvent>) => {

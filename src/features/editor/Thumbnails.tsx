@@ -11,12 +11,14 @@ import {
 } from '@dnd-kit/core'
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { GripVertical, RotateCw, Trash2 } from 'lucide-react'
+import { Copy, FilePlus, FilePlus2, GripVertical, RotateCw, Scissors, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useInView } from '@/hooks/use-in-view'
 import { cn } from '@/lib/utils'
 import { undo, useDoc } from '@/store/document'
 import { useSession } from '@/store/session'
+import { addBlankPage, duplicatePage, pickPdfToInsert } from './page-actions'
+import { isMainPage, sourceOf } from '@/lib/page-source'
 import { useUi } from '@/store/ui'
 import type { PageItem } from '@/types'
 import { choose } from './choice'
@@ -28,10 +30,11 @@ const thumbCache = new Map<string, string>()
 /** Small lazily-rendered page preview, cached per (source page, rotation). */
 const ThumbImage = memo(function ThumbImage({ page }: { page: PageItem }) {
   const ref = useRef<HTMLDivElement>(null)
-  const pdf = useSession((s) => s.pdf)
-  const info = useSession((s) => s.sourcePages[page.srcIndex])
+  useSession((s) => s.docs)
+  const src = sourceOf(page)
+  const { pdf, info } = src
   const visible = useInView(ref, '[data-thumbs-scroll]', '200px 0px')
-  const key = `${page.srcIndex}:${page.rotation}`
+  const key = `${src.key}:${page.rotation}`
   const [rendered, setRendered] = useState<{ key: string; url: string } | null>(null)
   const url = thumbCache.get(key) ?? (rendered?.key === key ? rendered.url : null)
   const rot = (info.rotate + page.rotation) % 360
@@ -42,7 +45,7 @@ const ThumbImage = memo(function ThumbImage({ page }: { page: PageItem }) {
     if (thumbCache.has(key) || !visible || !pdf) return
     let alive = true
     void (async () => {
-      const p = await pdf.getPage(page.srcIndex + 1)
+      const p = await pdf.getPage(src.index + 1)
       const scale = (THUMB_W * Math.min(2, devicePixelRatio || 1)) / w
       const vp = p.getViewport({ scale, rotation: rot })
       const canvas = document.createElement('canvas')
@@ -58,7 +61,7 @@ const ThumbImage = memo(function ThumbImage({ page }: { page: PageItem }) {
     return () => {
       alive = false
     }
-  }, [visible, pdf, key, page.srcIndex, rot, w])
+  }, [visible, pdf, key, src.index, rot, w])
 
   return (
     <div
@@ -117,6 +120,15 @@ function SortableThumb({
           <button
             type="button"
             className="grid size-11 place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground lg:size-8"
+            onClick={() => duplicatePage(page.id)}
+            aria-label={`Duplicate page ${index + 1}`}
+            data-testid="duplicate-page"
+          >
+            <Copy className="size-4" />
+          </button>
+          <button
+            type="button"
+            className="grid size-11 place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground lg:size-8"
             onClick={() => useDoc.getState().rotatePage(page.id, 90)}
             aria-label={`Rotate page ${index + 1}`}
           >
@@ -128,7 +140,7 @@ function SortableThumb({
             className="grid size-11 place-items-center rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-30 lg:size-8"
             onClick={async () => {
               // Bookmarks that lead to this page disappear with it: say so first.
-              const marks = useSession.getState().bookmarks[page.srcIndex] ?? []
+              const marks = isMainPage(page) ? (useSession.getState().bookmarks[page.srcIndex] ?? []) : []
               if (marks.length) {
                 const shown = marks.slice(0, 3).map((t) => `“${t}”`).join(', ') + (marks.length > 3 ? ` and ${marks.length - 3} more` : '')
                 const ok = await choose({
@@ -177,6 +189,25 @@ export function Thumbnails({ className }: { className?: string }) {
 
   return (
     <div data-thumbs-scroll className={cn('overflow-y-auto overscroll-contain', className)}>
+      <div className="sticky top-0 z-10 grid grid-cols-3 gap-1 border-b bg-background p-1.5">
+        {[
+          { label: 'Add PDF', icon: FilePlus2, run: pickPdfToInsert, id: 'insert-pdf' },
+          { label: 'Blank', icon: FilePlus, run: addBlankPage, id: 'blank-page' },
+          { label: 'Extract', icon: Scissors, run: () => useUi.getState().set({ extractOpen: true }), id: 'extract-pages' },
+        ].map((b) => (
+          <button
+            key={b.id}
+            type="button"
+            data-testid={b.id}
+            onClick={b.run}
+            title={b.id === 'insert-pdf' ? 'Insert pages from another PDF after this page' : b.id === 'blank-page' ? 'Insert a blank page after this page' : 'Extract or split pages into new PDFs'}
+            className="flex min-h-11 flex-col items-center justify-center gap-0.5 rounded-lg text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground lg:min-h-10"
+          >
+            <b.icon className="size-4" />
+            {b.label}
+          </button>
+        ))}
+      </div>
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
         <SortableContext items={pages.map((p) => p.id)} strategy={verticalListSortingStrategy}>
           <ol className="flex flex-col items-center gap-1 p-2" aria-label="Pages">

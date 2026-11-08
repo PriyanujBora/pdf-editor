@@ -175,6 +175,82 @@ print(','.join(kinds), ok_ap, len(list(hl.QuadPoints)) % 8 == 0, str(note.Conten
   assert.equal(out, 'Highlight,Ink,Line,Square,Text,Underline True True Check this figure True', out)
 })
 
+await test('pages: insert PDFs, blank, duplicate, extract; resume', async (page) => {
+  await open(page, 'form.pdf')
+  const insert = async (file) => {
+    const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.click('[data-testid=insert-pdf]')])
+    await chooser.setFiles(`${FIX}/${file}`)
+    await page.waitForFunction((n) => window.__doc.getState().pages.length >= n, null, { timeout: 20000 }).catch(() => {})
+  }
+  const count = () => page.evaluate(() => window.__doc.getState().pages.length)
+  await insert('bookmarks.pdf')
+  await page.waitForFunction(() => window.__doc.getState().pages.length === 6)
+  await page.click('[data-testid=blank-page]')
+  assert.equal(await count(), 7)
+  // Duplicate the last page (form page 2).
+  await page.locator('[data-testid=duplicate-page]').nth(6).click()
+  assert.equal(await count(), 8)
+  // Text on an inserted page and on the duplicate.
+  const pages = await page.evaluate(() => window.__doc.getState().pages)
+  await page.evaluate(([a, b]) => {
+    const mk = (pageId, text) => ({ id: 't_' + text, kind: 'text', pageId, x: 72, y: 300, rotation: 0, text, font: 'inter', size: 14, color: '#c00000', bold: false, italic: false, align: 'left', lineHeight: 1.2 })
+    window.__doc.getState().addElements([mk(a, 'OnInsertedPage'), mk(b, 'OnDuplicatePage')])
+  }, [pages[2].id, pages[7].id])
+  // The same form again: its field names clash.
+  await insert('form.pdf')
+  await page.waitForFunction(() => window.__doc.getState().pages.length === 10)
+  await page.waitForTimeout(500)
+  await page.screenshot({ path: `${OUT}/pages.png` })
+  const path = await download(page, 'assembled.pdf')
+  const out = py(
+    `import sys, re, subprocess, pikepdf, pypdf
+p = sys.argv[1]
+r = pypdf.PdfReader(p)
+n = len(r.pages)
+marks = []
+for i in range(n):
+    t = subprocess.run(['pdftotext', '-f', str(i+1), '-l', str(i+1), p, '-'], capture_output=True).stdout.decode('utf-8','replace')
+    m = re.search(r'page-(\\d)-zq', t)
+    marks.append((m.group(1) if m else '-') + ('I' if 'OnInsertedPage' in t else '') + ('D' if 'OnDuplicatePage' in t else ''))
+def flat(o, d=0):
+    out = []
+    for it in o:
+        if isinstance(it, list): out += flat(it, d+1)
+        else: out.append((d, it.title, r.get_destination_page_number(it)))
+    return out
+outline = flat(r.outline)
+links = []
+ins = [i for i, m in enumerate(marks) if 'I' in m][0]
+for a in r.pages[ins].get('/Annots') or []:
+    a = a.get_object()
+    if a.get('/Subtype') == '/Link':
+        d = a.get('/Dest')
+        links.append(r.get_page_number(d[0].get_object()) if d else None)
+names = sorted((r.get_fields() or {}).keys())
+pdf = pikepdf.open(p)
+pageobjs = sum(1 for o in pdf.objects if isinstance(o, pikepdf.Dictionary) and o.get('/Type') == '/Page')
+print(n, ''.join(m[0] for m in marks), [m for m in marks if len(m) > 1], outline, sorted(links), 'name (2)' in names and 'name' in names, pageobjs)`,
+    path,
+  )
+  // New pages go after the page in view (page 1): form 1, form 1-2 again, blank, bookmarks 1-4, form 2, its duplicate.
+  assert.ok(out.startsWith("10 112-123422 ['1I', '2D']"), out)
+  assert.ok(out.includes("(0, 'bookmarks', 4), (1, 'Chapter 1', 4), (2, 'Section 1.1', 5), (1, 'Chapter 2', 5), (1, 'Chapter 3', 6), (2, 'Section 3.1', 7)"), out)
+  assert.ok(out.includes('[5, 7] True 10'), out)
+  // Extract pages 2-3.
+  await page.click('[data-testid=extract-pages]')
+  await page.fill('[data-testid=extract-range]', '2-3')
+  const [dl] = await Promise.all([page.waitForEvent('download'), page.click('[data-testid=extract-go]')])
+  await dl.saveAs(`${OUT}/extract.pdf`)
+  assert.equal(py(`import sys, pypdf; print(len(pypdf.PdfReader(sys.argv[1]).pages))`, `${OUT}/extract.pdf`), '2')
+  // Resume: the inserted documents come back.
+  await page.waitForTimeout(1200)
+  await page.reload({ waitUntil: 'networkidle' })
+  await page.click('button:has-text("Continue")')
+  await page.waitForSelector('[data-page-id] canvas')
+  assert.equal(await count(), 10)
+  assert.equal(await page.evaluate(() => Object.keys(window.__session.getState().docs).length), 2)
+})
+
 await browser.close()
 console.log(failures ? `\n${failures} failed` : '\nall passed')
 process.exit(failures ? 1 : 0)

@@ -1,5 +1,7 @@
 import { useDoc } from '@/store/document'
 import { useSession } from '@/store/session'
+import { pdfPageOf, sourceOf } from '@/lib/page-source'
+import type { PageItem } from '@/types'
 import type { ImagePatch } from '@/lib/redact/images'
 import type { ExportRequest, ExportResponse, RedactionReport, RemovalNote } from './protocol'
 
@@ -18,7 +20,7 @@ export function isUnchanged() {
   const d = useDoc.getState()
   const pageIds = new Set(d.pages.map((p) => p.id))
   const hasEdits = Object.values(d.elements).some((el) => pageIds.has(el.pageId))
-  const samePages = d.pages.length === s.sourcePages.length && d.pages.every((p, i) => p.srcIndex === i && p.rotation === 0)
+  const samePages = d.pages.length === s.sourcePages.length && d.pages.every((p, i) => p.srcIndex === i && p.rotation === 0 && !p.doc && !p.blank)
   const cleanUp = Object.values(s.sanitize).some(Boolean)
   const form = Object.keys(d.formValues).length > 0 || s.form.flatten
   return !hasEdits && samePages && !cleanUp && !form
@@ -31,13 +33,15 @@ export function isUnchanged() {
  */
 export async function exportPdf(
   onProgress?: (v: number) => void,
-  opts: { keepEncryption?: boolean; forceRebuild?: boolean } = {},
+  opts: { keepEncryption?: boolean; forceRebuild?: boolean; pages?: PageItem[] } = {},
 ): Promise<ExportResult> {
   const s = useSession.getState()
-  const d = useDoc.getState()
+  const d0 = useDoc.getState()
+  // Extract / split: the same export with a subset of the pages.
+  const d = opts.pages ? { ...d0, pages: opts.pages } : d0
   if (!s.bytes) throw new Error('No document open')
   const keepEncryption = s.encrypted && opts.keepEncryption !== false
-  if (isUnchanged() && (keepEncryption || !s.encrypted) && !opts.forceRebuild && !(import.meta.env.DEV && (window as { __forceRebuild?: boolean }).__forceRebuild)) {
+  if (!opts.pages && isUnchanged() && (keepEncryption || !s.encrypted) && !opts.forceRebuild && !(import.meta.env.DEV && (window as { __forceRebuild?: boolean }).__forceRebuild)) {
     onProgress?.(1)
     return { bytes: s.bytes.slice(), notes: [] }
   }
@@ -63,7 +67,8 @@ export async function exportPdf(
     for (const page of d.pages) {
       if (!marked.has(page.id)) continue
       const rects = elements.flatMap((el) => (el.kind === 'redact' && el.pageId === page.id ? [el] : []))
-      imagePatches[page.id] = await redactedImages(await s.pdf.getPage(page.srcIndex + 1), s.sourcePages[page.srcIndex], rects)
+      const pg = await pdfPageOf(page)
+      if (pg) imagePatches[page.id] = await redactedImages(pg, sourceOf(page).info, rects)
     }
   }
 
@@ -77,7 +82,10 @@ export async function exportPdf(
     password: s.password,
     keepEncryption,
     pages: d.pages,
-    sourcePages: s.sourcePages,
+    infos: d.pages.map((p) => sourceOf(p).info),
+    docs: Object.fromEntries(
+      [...new Set(d.pages.flatMap((p) => (p.doc ? [p.doc] : [])))].map((id) => [id, { bytes: s.docs[id].bytes, name: s.docs[id].name }]),
+    ),
     elements,
     assets,
     baseUrl: new URL(import.meta.env.BASE_URL, location.href).href,

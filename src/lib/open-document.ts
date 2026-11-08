@@ -26,6 +26,7 @@ interface OpenOptions {
     assets: Record<string, ImageAsset>
     sanitize?: SanitizeOptions
     formValues?: Record<string, FieldValue>
+    docs?: { id: string; name: string }[]
   }
 }
 
@@ -36,7 +37,7 @@ interface OpenOptions {
 export async function openDocument(bytes: Uint8Array, fileName: string, opts: OpenOptions = {}) {
   const session = useSession.getState()
   const prev = session.pdf
-  session.set({ status: 'loading', progress: 0 })
+  session.set({ status: 'loading', progress: 0, docs: {} })
 
   try {
     const pdfjs = await loadPdfJs()
@@ -75,8 +76,8 @@ export async function openDocument(bytes: Uint8Array, fileName: string, opts: Op
     }
 
     const restored = opts.restore
-    const pages: PageItem[] =
-      restored?.pages?.filter((p) => p.srcIndex < pdf.numPages) ??
+    let pages: PageItem[] =
+      restored?.pages?.filter((p) => p.doc || p.blank || p.srcIndex < pdf.numPages) ??
       sourcePages.map((_, i) => ({ id: uid('p_'), srcIndex: i, rotation: 0 as Rotation }))
 
     void prev?.loadingTask.destroy()
@@ -107,6 +108,17 @@ export async function openDocument(bytes: Uint8Array, fileName: string, opts: Op
       sanitize: { ...NO_SANITIZE, ...restored?.sanitize },
       form: { ...form, flatten: false },
     })
+    // Inserted PDFs of a resumed session; pages of any that can't be read again are dropped.
+    if (restored?.docs?.length) {
+      const { openInserted } = await import('@/features/editor/page-actions')
+      const { loadInsertedDoc } = await import('@/lib/persist')
+      const ok = new Set<string>()
+      for (const d of restored.docs) {
+        const rec = await loadInsertedDoc(d.id).catch(() => undefined)
+        if (rec && (await openInserted(d.id, rec.name, rec.bytes).then(() => true, () => false))) ok.add(d.id)
+      }
+      pages = pages.filter((p) => !p.doc || ok.has(p.doc))
+    }
     useDoc.getState().reset(pages, restored?.elements ?? {}, restored?.formValues ?? {})
     clearHistory()
     useUi.getState().set({ selectedId: null, editingId: null, tool: 'select', currentPageId: pages[0]?.id ?? null })
@@ -174,6 +186,7 @@ export async function resumeSaved(password?: string) {
       assets: saved.assets,
       sanitize: saved.meta?.sanitize,
       formValues: saved.meta?.formValues,
+      docs: saved.meta?.docs,
     },
   })
 }
@@ -181,8 +194,8 @@ export async function resumeSaved(password?: string) {
 /** Back to the landing page. The autosave is kept so it can be resumed. */
 export async function closeDocument() {
   const { pages, elements, formValues } = useDoc.getState()
-  const { fileName, status, sanitize } = useSession.getState()
-  if (status === 'ready') await saveState({ fileName, pages, elements, sanitize, formValues }).catch(() => {})
+  const { fileName, status, sanitize, docs } = useSession.getState()
+  if (status === 'ready') await saveState({ fileName, pages, elements, sanitize, formValues, docs: Object.entries(docs).map(([id, d]) => ({ id, name: d.name })) }).catch(() => {})
   useSession.getState().close()
   useDoc.getState().reset([], {})
   clearHistory()

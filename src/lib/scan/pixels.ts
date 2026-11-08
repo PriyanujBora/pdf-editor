@@ -109,12 +109,12 @@ export interface RegionPixels {
 
 export async function scanPixels(
   page: PDFPageProxy,
-  srcIndex: number,
+  key: string,
   info: SourcePageInfo,
   want: PtRect,
   fallbackScale: number,
 ): Promise<RegionPixels> {
-  const im = pageImage(String(srcIndex))
+  const im = pageImage(key)
   const m = im && imageToPage(info, im.ctm, im.width, im.height)
   const canvas = im && m ? await imageCanvas(page, im.objId) : null
   if (im && m && canvas) {

@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef } from 'react'
 import Konva from 'konva'
 import { useDoc } from '@/store/document'
-import { useSession } from '@/store/session'
+import { sourceOf } from '@/lib/page-source'
 import { clampZoom, useUi } from '@/store/ui'
 import { PageView } from './PageView'
 import { viewerBridge } from './viewer-bridge'
@@ -18,12 +18,11 @@ interface Anchor {
 
 /** Zoom at which the first page fills the container width (capped at 150%). */
 function fitWidthZoom(container: HTMLElement) {
-  const { sourcePages } = useSession.getState()
   const { pages } = useDoc.getState()
   const { currentPageId } = useUi.getState()
   const page = pages.find((p) => p.id === currentPageId) ?? pages[0]
   if (!page) return 1
-  const s = sourcePages[page.srcIndex]
+  const s = sourceOf(page).info
   const avail = container.clientWidth - (container.clientWidth < 640 ? 24 : 64)
   return clampZoom(Math.min(1.5, avail / (page.rotation % 180 ? s.height : s.width)))
 }

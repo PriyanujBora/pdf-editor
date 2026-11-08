@@ -26,10 +26,14 @@ export interface SourcePageInfo {
 /** A page in the edited document, in output order. */
 export interface PageItem {
   id: string
-  /** 0-based index into the source PDF. */
+  /** 0-based index into its source PDF (-1 for a blank page). */
   srcIndex: number
   /** Extra clockwise rotation chosen by the user. */
   rotation: Rotation
+  /** Source document: absent = the file that was opened, else an inserted PDF (session.docs). */
+  doc?: string
+  /** A new blank page of this size (points). */
+  blank?: { width: number; height: number }
 }
 
 export type FontFamilyId =

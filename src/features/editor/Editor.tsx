@@ -8,6 +8,7 @@ import { useUi } from '@/store/ui'
 import { ChoiceDialog } from './ChoiceDialog'
 import { SignatureDialog } from './SignatureDialog'
 import { AnnotateBar } from './AnnotateBar'
+import { ExtractDialog } from './ExtractDialog'
 import { MobileToolbar } from './MobileToolbar'
 import { PropertiesPanel } from './PropertiesPanel'
 import { Thumbnails } from './Thumbnails'
@@ -53,6 +54,7 @@ export default function Editor() {
           </div>
           <ChoiceDialog />
           <SignatureDialog />
+          <ExtractDialog />
         </div>
       </TooltipProvider>
     )
@@ -68,6 +70,7 @@ export default function Editor() {
       <MobileToolbar />
       <ChoiceDialog />
       <SignatureDialog />
+      <ExtractDialog />
 
       <Sheet open={thumbsOpen} onOpenChange={(o) => useUi.getState().set({ thumbsOpen: o })}>
         <SheetContent side="left" className="flex w-[min(85vw,280px)] flex-col gap-0 p-0">

@@ -35,8 +35,8 @@ export const cssFace = (font: FontFamilyId, bold: boolean, px: number, italic = 
 export const splitWords = (text: string) => text.split(/\s+/).filter(Boolean)
 
 /** Scan resolution in px/pt from the page's largest image (0 when not a scan). */
-export function scanScale(srcIndex: number, info: SourcePageInfo) {
-  const imgW = largestImageWidth(String(srcIndex))
+export function scanScale(key: string, info: SourcePageInfo) {
+  const imgW = largestImageWidth(key)
   const viewW = info.view[2] - info.view[0]
   if (imgW < 400 || viewW <= 0) return 0
   return Math.min(4, Math.max(1.5, imgW / viewW))
@@ -66,13 +66,13 @@ interface FaceFit {
 export async function fitScanLine(
   page: PDFPageProxy,
   info: SourcePageInfo,
-  srcIndex: number,
+  key: string,
   block: TextBlock,
 ): Promise<FitResult> {
-  const approx = scanScale(srcIndex, info)
+  const approx = scanScale(key, info)
   if (!approx) return { ok: false, reason: 'not-scan' }
   // The scan's own pixels (no resampling), on its pixel grid.
-  const px = await scanPixels(page, srcIndex, info, lineRegion(block, info), approx)
+  const px = await scanPixels(page, key, info, lineRegion(block, info), approx)
   const { region, img, scale } = px
   const { width: w, height: h } = img
   const pad = 0.4 * block.size * scale

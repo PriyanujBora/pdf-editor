@@ -16,6 +16,7 @@ import type { TextBlock } from '@/lib/pdf/text-blocks'
 import { ASCENT } from '@/lib/text-layout'
 import { apply, rotate, userRotation } from '@/lib/export/matrix'
 import { useDoc } from '@/store/document'
+import { sourceOf } from '@/lib/page-source'
 import { useSession } from '@/store/session'
 import { useUi } from '@/store/ui'
 import type { EditorElement, FieldValue, OriginalFont, PageItem, PtRect, TextElement } from '@/types'
@@ -24,7 +25,7 @@ import type { EditorElement, FieldValue, OriginalFont, PageItem, PtRect, TextEle
 export const renderedCanvases = new Map<string, { canvas: HTMLCanvasElement; scale: number }>()
 
 export function pageSize(page: PageItem) {
-  const info = useSession.getState().sourcePages[page.srcIndex]
+  const info = sourceOf(page).info
   return { width: info.width, height: info.height }
 }
 
@@ -77,12 +78,12 @@ let fitting: string | null = null
 async function editScanBlock(page: PageItem, block: TextBlock) {
   if (fitting === block.id) return
   fitting = block.id
-  const { pdf, sourcePages } = useSession.getState()
-  const info = sourcePages[page.srcIndex]
+  const src = sourceOf(page)
+  const info = src.info
   let toastId: string | number | undefined
   const slow = setTimeout(() => (toastId = toast.loading('Matching the scan…')), 250)
   try {
-    const fit = pdf ? await fitScanLine(await pdf.getPage(page.srcIndex + 1), info, page.srcIndex, block) : null
+    const fit = src.pdf ? await fitScanLine(await src.pdf.getPage(src.index + 1), info, src.key, block) : null
     clearTimeout(slow)
     if (!fit?.ok) {
       const why = fit && !fit.ok ? SCAN_FALLBACK[fit.reason] : undefined
@@ -485,7 +486,7 @@ export async function downloadPdf() {
       toast.loading('Checking the redacted file…', { id })
       const s = useSession.getState()
       const { verifyRedaction } = await import('@/lib/redact/verify')
-      const v = await verifyRedaction(bytes, keepEncryption && s.encrypted ? s.password : '', useDoc.getState().pages, s.sourcePages, marks, s.pdf!)
+      const v = await verifyRedaction(bytes, keepEncryption && s.encrypted ? s.password : '', useDoc.getState().pages, marks)
       if (v.problems.length) {
         toast.error('Nothing was downloaded', { id, duration: 5000 })
         await explain('Nothing was downloaded', 'The check after redacting found something that should be gone:', v.problems)

@@ -3,6 +3,7 @@ import { apply, mul, pdfToPage, scale, userRotation } from '@/lib/export/matrix'
 import { useDoc } from '@/store/document'
 import { useUi } from '@/store/ui'
 import { currentValue, pageWidgets, type Widget } from '@/lib/forms'
+import { isMainPage } from '@/lib/page-source'
 import type { FieldValue, PageItem, SourcePageInfo } from '@/types'
 
 /**
@@ -114,11 +115,12 @@ export function FormLayer({ page, info, zoom }: Props) {
   const tool = useUi((s) => s.tool)
   useEffect(() => {
     let alive = true
-    void pageWidgets(page.srcIndex).then((w) => alive && setWidgets(w))
+    // Form fields belong to the opened file; inserted pages are shown as printed.
+    if (isMainPage(page)) void pageWidgets(page.srcIndex).then((w) => alive && setWidgets(w))
     return () => {
       alive = false
     }
-  }, [page.srcIndex])
+  }, [page])
 
   const toPage = useMemo(() => pdfToPage(info.view, info.rotate), [info])
   const boxes = useMemo(

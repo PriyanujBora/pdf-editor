@@ -26,6 +26,8 @@ export interface DocState {
   movePage: (from: number, to: number) => void
   rotatePage: (pageId: string, delta: 90 | -90) => void
   removePage: (pageId: string) => void
+  /** New pages (inserted PDF, blank, duplicate) and the elements on them, in one undo step. */
+  insertPages: (at: number, pages: PageItem[], elements?: EditorElement[]) => void
 }
 
 type Tracked = Pick<DocState, 'pages' | 'elements' | 'formValues'>
@@ -112,6 +114,13 @@ export const useDoc = create<DocState>()(
             p.id === pageId ? { ...p, rotation: ((((p.rotation + delta) % 360) + 360) % 360) as Rotation } : p,
           ),
         })),
+
+      insertPages: (at, items, els = []) =>
+        set((s) => {
+          const pages = s.pages.slice()
+          pages.splice(at, 0, ...items)
+          return { pages, elements: els.length ? { ...s.elements, ...Object.fromEntries(els.map((e) => [e.id, e])) } : s.elements }
+        }),
 
       removePage: (pageId) =>
         set((s) => {

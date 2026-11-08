@@ -40,6 +40,7 @@ import { annotationsUnder, redactPage, type Box, type ImageSwap } from '@/lib/co
 import { sanitize } from './sanitize'
 import { fillForm } from './fill-form'
 import { addAnnotation } from './annotations'
+import { assemblePages } from './assemble'
 import { findLeaks, scrubStrings } from './verify-scan'
 import { compatFontkit } from './fontkit-compat'
 import { applySourceEncryption, readEncryption } from './keep-encryption'
@@ -93,8 +94,8 @@ async function buildPdf(req: ExportRequest, notes: RemovalNote[], out: { redacti
   }
   scanNote()
 
-  const pages = doc.getPages()
-  const order = req.pages.map((p) => p.srcIndex)
+  // Output pages: the opened file's (duplicated when used twice), blank ones, inserted PDFs'.
+  const { pageOf, all: pages, order, mainCount } = await assemblePages(doc, req.pages, req.docs ?? {})
   progress(0.15)
 
   const fonts = new FontCache(doc, req.baseUrl)
@@ -103,8 +104,8 @@ async function buildPdf(req: ExportRequest, notes: RemovalNote[], out: { redacti
 
   for (let i = 0; i < req.pages.length; i++) {
     const item = req.pages[i]
-    const info = req.sourcePages[item.srcIndex]
-    const page = pages[item.srcIndex]
+    const info = req.infos[i]
+    const page = pageOf[i]
     const els = req.elements.filter((el) => el.pageId === item.id)
     if ((info.rotate + item.rotation) % 360 !== ((page.getRotation().angle % 360) + 360) % 360)
       page.setRotation(degrees((info.rotate + item.rotation) % 360))
@@ -224,8 +225,8 @@ async function buildPdf(req: ExportRequest, notes: RemovalNote[], out: { redacti
       const item = req.pages[i]
       const mine = marks.filter((m) => m.pageId === item.id)
       if (!mine.length) continue
-      const info = req.sourcePages[item.srcIndex]
-      const page = pages[item.srcIndex]
+      const info = req.infos[i]
+      const page = pageOf[i]
       markedPages.push(page)
       const pageMat = pdfToPage(info.view, info.rotate)
       const toPage = [pageMat.a, pageMat.b, pageMat.c, pageMat.d, pageMat.e, pageMat.f] as [number, number, number, number, number, number]
@@ -249,7 +250,7 @@ async function buildPdf(req: ExportRequest, notes: RemovalNote[], out: { redacti
     // Marked words in bookmark titles and tag texts.
     scrubStrings(doc, marks.flatMap((m) => (m.text ? [m.text] : [])))
   }
-  const kept = req.pages.map((p) => pages[p.srcIndex])
+  const kept = pageOf
   if (Object.values(req.sanitize).some(Boolean)) {
     const r = sanitize(doc, kept, req.sanitize)
     report.sanitized = r.removed
@@ -260,7 +261,7 @@ async function buildPdf(req: ExportRequest, notes: RemovalNote[], out: { redacti
   // Page order, deleted pages and everything that pointed at them; then drop unreachable objects
   // (deleted pages, replaced streams, superseded revisions) so they don't ship in the file.
   rebuildPageTree(doc, pages, order)
-  pruneDeletedPages(doc, pages, order)
+  pruneDeletedPages(doc, pages, order, mainCount)
   await doc.flush()
   collectGarbage(doc.context)
   if (marks.length || Object.values(req.sanitize).some(Boolean)) {

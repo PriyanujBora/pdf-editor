@@ -7,7 +7,10 @@ export interface ExportRequest {
   /** Encrypted source: re-encrypt the output with the original passwords and permissions. */
   keepEncryption: boolean
   pages: PageItem[]
-  sourcePages: SourcePageInfo[]
+  /** Geometry of each output page's source (same order as `pages`). */
+  infos: SourcePageInfo[]
+  /** Inserted PDFs the pages use (PageItem.doc). */
+  docs: Record<string, { bytes: Uint8Array; name: string }>
   elements: EditorElement[]
   assets: Record<string, ImageAsset>
   /** PNG patch per scan-matched text element id. */

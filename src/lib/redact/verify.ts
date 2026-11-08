@@ -1,8 +1,8 @@
-import type { PDFDocumentProxy } from 'pdfjs-dist'
 import type { TextItem } from 'pdfjs-dist/types/src/display/api'
 import { loadPdfJs, PDFJS_ASSET_OPTIONS } from '@/lib/pdf/pdfjs'
 import { captureGlyphs } from '@/lib/text/capture'
-import type { PageItem, RedactElement, SourcePageInfo } from '@/types'
+import { pdfPageOf, sourceOf } from '@/lib/page-source'
+import type { PageItem, RedactElement } from '@/types'
 import { glyphRedactBox, glyphUnder, type Box } from './geometry'
 
 /**
@@ -20,11 +20,13 @@ function count(hay: string, needle: string) {
   return n
 }
 
-async function pageTexts(pdf: PDFDocumentProxy, indices: number[]): Promise<string> {
+async function texts(pages: Promise<{ getTextContent: () => Promise<{ items: unknown[] }> } | null>[]): Promise<string> {
   const parts: string[] = []
-  for (const i of indices) {
-    const tc = await (await pdf.getPage(i + 1)).getTextContent()
-    parts.push(tc.items.map((it) => ('str' in it ? (it as TextItem).str : '')).join(''))
+  for (const p of pages) {
+    const pg = await p
+    if (!pg) continue
+    const tc = await pg.getTextContent()
+    parts.push(tc.items.map((it) => (it && typeof it === 'object' && 'str' in it ? (it as TextItem).str : '')).join(''))
   }
   return normalize(parts.join(''))
 }
@@ -39,9 +41,7 @@ export async function verifyRedaction(
   bytes: Uint8Array,
   password: string,
   pages: PageItem[],
-  sourcePages: SourcePageInfo[],
   marks: RedactElement[],
-  source: PDFDocumentProxy,
 ): Promise<VerifyResult> {
   const pdfjs = await loadPdfJs()
   const task = pdfjs.getDocument({ data: bytes.slice(), password, ...PDFJS_ASSET_OPTIONS, fontExtraProperties: true, enableXfa: false })
@@ -54,7 +54,7 @@ export async function verifyRedaction(
       const mine = marks.filter((m) => m.pageId === pages[i].id)
       if (!mine.length) continue
       const page = await out.getPage(i + 1)
-      const info = sourcePages[pages[i].srcIndex]
+      const info = sourceOf(pages[i]).info
       // Page space of the original page: the viewport with its original rotation.
       const { glyphs, fonts } = await captureGlyphs(page, info.rotate)
       // The same test the export used to decide what to remove (shrunk a little against float noise).
@@ -78,9 +78,8 @@ export async function verifyRedaction(
       }
     }
     if (needles.length) {
-      const order = pages.map((p) => p.srcIndex)
-      const before = await pageTexts(source, order)
-      const after = await pageTexts(out, pages.map((_, i) => i).filter((i) => i < out.numPages))
+      const before = await texts(pages.map((p) => pdfPageOf(p)))
+      const after = await texts(pages.map((_, i) => (i < out.numPages ? out.getPage(i + 1) : Promise.resolve(null))))
       for (const n of needles) {
         const marked = marks.filter((m) => m.text && normalize(m.text) === n).length
         const allowed = Math.max(0, count(before, n) - marked)

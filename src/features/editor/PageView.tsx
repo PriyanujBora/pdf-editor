@@ -8,6 +8,7 @@ import { InlineTextEditor } from './InlineTextEditor'
 import { PageCanvas } from './PageCanvas'
 import { PageOverlay } from './PageOverlay'
 import { FormLayer } from './FormLayer'
+import { sourceOf } from '@/lib/page-source'
 
 interface Props {
   page: PageItem
@@ -18,7 +19,9 @@ interface Props {
 /** One page: placeholder until near the viewport, then canvas + editing overlay. */
 export const PageView = memo(function PageView({ page, index, zoom }: Props) {
   const ref = useRef<HTMLDivElement>(null)
-  const info = useSession((s) => s.sourcePages[page.srcIndex])
+  // Re-read when inserted documents change.
+  useSession((s) => s.docs)
+  const info = sourceOf(page).info
   const visible = useInView(ref, '[data-testid="viewer"]', '150% 150%')
   const editingId = useUi((s) => s.editingId)
   const hasForm = useSession((s) => s.form.fields > 0)
@@ -45,7 +48,7 @@ export const PageView = memo(function PageView({ page, index, zoom }: Props) {
         <>
           <PageCanvas
             pageId={page.id}
-            srcIndex={page.srcIndex}
+            page={page}
             rotation={info.rotate + page.rotation}
             zoom={zoom}
             width={dispW}

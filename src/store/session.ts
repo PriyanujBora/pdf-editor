@@ -1,5 +1,13 @@
 import { create } from 'zustand'
 import type { PDFDocumentProxy } from 'pdfjs-dist'
+
+/** A PDF inserted into the open one (Phase 6 "Insert PDF"). */
+export interface InsertedDoc {
+  name: string
+  bytes: Uint8Array
+  pdf: PDFDocumentProxy
+  sourcePages: SourcePageInfo[]
+}
 import type { ImageAsset, SanitizeOptions, SourcePageInfo } from '@/types'
 
 export const NO_SANITIZE: SanitizeOptions = {
@@ -33,6 +41,8 @@ interface SessionState {
   form: { fields: number; calculated: boolean; flatten: boolean }
   pdf: PDFDocumentProxy | null
   sourcePages: SourcePageInfo[]
+  /** Inserted PDFs by id (pages refer to them with PageItem.doc). */
+  docs: Record<string, InsertedDoc>
   assets: Record<string, ImageAsset>
 
   set: (patch: Partial<SessionState>) => void
@@ -53,12 +63,14 @@ export const useSession = create<SessionState>()((set, get) => ({
   form: { fields: 0, calculated: false, flatten: false },
   pdf: null,
   sourcePages: [],
+  docs: {},
   assets: {},
 
   set: (patch) => set(patch),
   addAsset: (a) => set((s) => ({ assets: { ...s.assets, [a.id]: a } })),
   close: () => {
     void get().pdf?.loadingTask.destroy()
-    set({ status: 'empty', progress: 0, fileName: '', bytes: null, password: '', encrypted: false, bookmarks: {}, notRemoved: {}, sanitize: NO_SANITIZE, form: { fields: 0, calculated: false, flatten: false }, pdf: null, sourcePages: [], assets: {} })
+    for (const d of Object.values(get().docs)) void d.pdf.loadingTask.destroy()
+    set({ status: 'empty', progress: 0, fileName: '', bytes: null, password: '', encrypted: false, bookmarks: {}, notRemoved: {}, sanitize: NO_SANITIZE, form: { fields: 0, calculated: false, flatten: false }, pdf: null, sourcePages: [], docs: {}, assets: {} })
   },
 }))

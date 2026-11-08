@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react'
 import type { RenderTask } from 'pdfjs-dist'
 import { useSession } from '@/store/session'
+import { sourceOf } from '@/lib/page-source'
+import type { PageItem } from '@/types'
 import { loadPdfJs } from '@/lib/pdf/pdfjs'
 import { renderedCanvases } from './actions'
 
@@ -9,7 +11,7 @@ const MAX_PIXELS = 16_000_000
 
 interface Props {
   pageId: string
-  srcIndex: number
+  page: PageItem
   /** Total rotation to render: original /Rotate + user rotation. */
   rotation: number
   zoom: number
@@ -25,9 +27,10 @@ interface Props {
  * done, so re-renders on zoom never flash blank. Until then the previous
  * canvas is simply stretched by CSS.
  */
-export function PageCanvas({ pageId, srcIndex, rotation, zoom, width, height, forms }: Props) {
+export function PageCanvas({ pageId, page: item, rotation, zoom, width, height, forms }: Props) {
   const holder = useRef<HTMLDivElement>(null)
-  const pdf = useSession((s) => s.pdf)
+  useSession((s) => s.docs)
+  const { pdf, index: srcIndex } = sourceOf(item)
 
   useEffect(() => {
     if (!pdf) return

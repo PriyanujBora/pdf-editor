@@ -11,9 +11,9 @@ export function useAutosave() {
     let timer: ReturnType<typeof setTimeout> | undefined
     const flush = () => {
       const { pages, elements, formValues } = useDoc.getState()
-      const { fileName, status, sanitize } = useSession.getState()
+      const { fileName, status, sanitize, docs } = useSession.getState()
       if (status !== 'ready') return
-      void saveState({ fileName, pages, elements, sanitize, formValues }).catch(() => {})
+      void saveState({ fileName, pages, elements, sanitize, formValues, docs: Object.entries(docs).map(([id, d]) => ({ id, name: d.name })) }).catch(() => {})
     }
     const unsubDoc = useDoc.subscribe((s, prev) => {
       if (s.pages === prev.pages && s.elements === prev.elements && s.formValues === prev.formValues) return
