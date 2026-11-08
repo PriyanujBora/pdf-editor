@@ -479,4 +479,94 @@ function textOps(page, lines) {
   await writeFile(`${OUT}/word-style.pdf`, await doc.save())
 }
 
+// --- Redaction (npm run test:redaction) -----------------------------------------------------------
+// Everything a careless redaction leaks: live text under a drawn black box ("Manafort-style"),
+// personal data in the text, an image and a vector drawing to black out, a comment, a form value,
+// a mailto link, a hidden layer, metadata + XMP, JavaScript, an attachment, a bookmark, OCR text.
+{
+  const browser = await chromium.launch()
+  const shot = await browser.newPage({ viewport: { width: 120, height: 60 } })
+  // Left half green, right half pure red: no red pixel may survive the redaction.
+  await shot.setContent('<body style="margin:0;display:flex"><div style="width:60px;height:60px;background:#00b050"></div><div style="width:60px;height:60px;background:#ff0000"></div></body>')
+  const png = await shot.screenshot({ type: 'png' })
+  const scanPage = await browser.newPage({ viewport: { width: 612, height: 792 }, deviceScaleFactor: 1.5 })
+  await scanPage.setContent(`<body style="margin:0;background:#f4f2ea;font:16px Georgia,serif;color:#222;padding:80px">
+    <p style="margin:0 0 0">Invisible OCR line mentions John Q. Sample here.</p><p>Second scanned line stays readable.</p></body>`)
+  const jpg = await scanPage.screenshot({ type: 'jpeg', quality: 80 })
+  await browser.close()
+
+  const doc = await PDFDocument.create()
+  const ctx = doc.context
+  const helv = await doc.embedFont(StandardFonts.Helvetica)
+  const p = doc.addPage([595, 842])
+  const line = (t, y, size = 12) => p.drawText(t, { x: 72, y, size, font: helv })
+  line('Case file 2026-114', 780, 18)
+  line('Name: John Q. Sample', 740)
+  line('Email: john.sample@example.com', 720)
+  line('PAN: ABCDE1234F', 700)
+  line('Card: 4111 1111 1111 1111', 680)
+  line('Phone: +91 98765 43210', 660)
+  line('Unrelated paragraph stays exactly as it was.', 640)
+  // Manafort-style: a black rectangle drawn over text that is still in the file.
+  line('Wire to account 99-ZEBRA-7731 today.', 600)
+  p.drawRectangle({ x: 125, y: 596, width: 140, height: 16, color: rgb(0, 0, 0) })
+  p.drawImage(await doc.embedPng(png), { x: 72, y: 480, width: 120, height: 60 })
+  // A vector "signature" with distinctive coordinates.
+  p.drawSvgPath('M 301.37 0 C 320 -30, 340 20, 360 -10 S 390 -20, 398.61 5', { x: 0, y: 530, borderColor: rgb(0.1, 0.1, 0.5), borderWidth: 1.5 })
+  // Hidden layer (switched off by default).
+  const ocg = ctx.register(ctx.obj({ Type: 'OCG', Name: PDFHexString.fromText('Internal notes') }))
+  p.node.Resources().set(PDFName.of('Properties'), ctx.obj({ oc1: ocg }))
+  const hidden = ctx.flateStream(`/OC /oc1 BDC BT /${p.node.newFontDictionary('HL', helv.ref).decodeText()} 12 Tf 72 420 Td (HIDDEN-LAYER-QX9 secret) Tj ET EMC`)
+  p.node.addContentStream(ctx.register(hidden))
+  doc.catalog.set(PDFName.of('OCProperties'), ctx.obj({ OCGs: [ocg], D: ctx.obj({ OFF: [ocg], Order: [ocg] }) }))
+  // A comment, a form field, a mailto link over the email line.
+  const comment = ctx.register(
+    ctx.obj({ Type: 'Annot', Subtype: 'Text', Rect: [500, 760, 520, 780], Contents: PDFHexString.fromText('Reviewer note about John Q. Sample'), Open: false }),
+  )
+  const mailto = ctx.register(
+    ctx.obj({ Type: 'Annot', Subtype: 'Link', Rect: [110, 716, 260, 732], Border: [0, 0, 0], A: ctx.obj({ S: 'URI', URI: PDFHexString.fromText('mailto:john.sample@example.com') }) }),
+  )
+  const form = doc.getForm()
+  const applicant = form.createTextField('applicant')
+  applicant.setText('John Q. Sample')
+  applicant.addToPage(p, { x: 300, y: 380, width: 200, height: 22 })
+  p.node.Annots().push(comment)
+  p.node.Annots().push(mailto)
+  // Metadata, XMP, JavaScript, attachment, bookmark.
+  doc.setTitle('Report on John Q. Sample')
+  doc.setAuthor('Agent K')
+  const xmp = `<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?><x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title><rdf:Alt><rdf:li xml:lang="x-default">Report on John Q. Sample</rdf:li></rdf:Alt></dc:title></rdf:Description></rdf:RDF></x:xmpmeta><?xpacket end="w"?>`
+  doc.catalog.set(PDFName.of('Metadata'), ctx.register(ctx.stream(xmp, { Type: 'Metadata', Subtype: 'XML' })))
+  const js = ctx.register(ctx.obj({ S: 'JavaScript', JS: PDFHexString.fromText("app.alert('Hello John Q. Sample');") }))
+  doc.catalog.set(PDFName.of('OpenAction'), js)
+  await doc.attach(Buffer.from('John Q. Sample secret notes'), 'notes.txt', { mimeType: 'text/plain' })
+  doc.catalog.set(PDFName.of('Names'), ctx.obj({ JavaScript: ctx.obj({ Names: [PDFHexString.fromText('greet'), js] }) }))
+  const outlines = ctx.nextRef()
+  const item = ctx.register(ctx.obj({ Title: PDFHexString.fromText('Profile of John Q. Sample'), Parent: outlines, Dest: [p.ref, PDFName.of('Fit')] }))
+  ctx.assign(outlines, ctx.obj({ Type: 'Outlines', First: item, Last: item, Count: 1 }))
+  doc.catalog.set(PDFName.of('Outlines'), outlines)
+  // Page 2: a "scan" with an invisible OCR layer.
+  const p2 = doc.addPage([612, 792])
+  p2.drawImage(await doc.embedJpg(jpg), { x: 0, y: 0, width: 612, height: 792 })
+  const ocr = p2.node.newFontDictionary('OCR', helv.ref)
+  p2.pushOperators(
+    pushGraphicsState(),
+    beginText(),
+    setTextRenderingMode(TextRenderingMode.Invisible),
+    setFontAndSize(ocr, 16),
+    setTextMatrix(1, 0, 0, 1, 80, 792 - 80 - 14),
+    showText(helv.encodeText('Invisible OCR line mentions John Q. Sample here.')),
+    endText(),
+    popGraphicsState(),
+  )
+  await writeFile(`${OUT}/redaction.pdf`, await doc.save({ updateFieldAppearances: true }))
+
+  // Something that can't be redacted: an inline image. The download must be refused.
+  const blocked = await PDFDocument.create()
+  const bp = blocked.addPage([400, 300])
+  bp.drawText('An inline image is below.', { x: 40, y: 250, size: 12, font: await blocked.embedFont(StandardFonts.Helvetica) })
+  bp.node.addContentStream(blocked.context.register(blocked.context.flateStream('q 80 0 0 80 40 120 cm BI /W 2 /H 2 /CS /G /BPC 8 ID \x00\xff\xff\x00 EI Q')))
+  await writeFile(`${OUT}/redaction-blocked.pdf`, await blocked.save())
+}
+
 console.log('fixtures written to', OUT)

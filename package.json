@@ -19,7 +19,8 @@
     "test:prod": "node tests/prod-smoke.mjs",
     "test:edit-stability": "node tests/edit-stability.mjs",
     "corpus:word": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/corpus-word.ps1",
-    "test:fidelity": "node tests/fidelity.mjs"
+    "test:fidelity": "node tests/fidelity.mjs",
+    "test:redaction": "node tests/redaction.mjs"
   },
   "dependencies": {
     "@cantoo/pdf-lib": "^2.11.1",
