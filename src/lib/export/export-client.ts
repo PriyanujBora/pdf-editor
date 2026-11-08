@@ -1,6 +1,6 @@
 import { useDoc } from '@/store/document'
 import { useSession } from '@/store/session'
-import type { ExportRequest, ExportResponse } from './protocol'
+import type { ExportRequest, ExportResponse, RemovalNote } from './protocol'
 
 /** True when the download would be the original file: no edits, same pages in the same order. */
 export function isUnchanged() {
@@ -17,14 +17,17 @@ export function isUnchanged() {
  * With no changes at all the original bytes are returned untouched (perfect fidelity, protection
  * included) — unless the user chose to remove the password protection.
  */
-export async function exportPdf(onProgress?: (v: number) => void, opts: { keepEncryption?: boolean; forceRebuild?: boolean } = {}): Promise<Uint8Array> {
+export async function exportPdf(
+  onProgress?: (v: number) => void,
+  opts: { keepEncryption?: boolean; forceRebuild?: boolean } = {},
+): Promise<{ bytes: Uint8Array; notes: RemovalNote[] }> {
   const s = useSession.getState()
   const d = useDoc.getState()
   if (!s.bytes) throw new Error('No document open')
   const keepEncryption = s.encrypted && opts.keepEncryption !== false
   if (isUnchanged() && (keepEncryption || !s.encrypted) && !opts.forceRebuild && !(import.meta.env.DEV && (window as { __forceRebuild?: boolean }).__forceRebuild)) {
     onProgress?.(1)
-    return s.bytes.slice()
+    return { bytes: s.bytes.slice(), notes: [] }
   }
 
   const pageIds = new Set(d.pages.map((p) => p.id))
@@ -53,13 +56,13 @@ export async function exportPdf(onProgress?: (v: number) => void, opts: { keepEn
   }
 
   const worker = new Worker(new URL('./export.worker.ts', import.meta.url), { type: 'module' })
-  return new Promise<Uint8Array>((resolve, reject) => {
+  return new Promise<{ bytes: Uint8Array; notes: RemovalNote[] }>((resolve, reject) => {
     worker.onmessage = (e: MessageEvent<ExportResponse>) => {
       const m = e.data
       if (m.type === 'progress') onProgress?.(m.value)
       else {
         worker.terminate()
-        if (m.type === 'done') resolve(m.bytes)
+        if (m.type === 'done') resolve({ bytes: m.bytes, notes: m.notes })
         else reject(new Error(m.message))
       }
     }

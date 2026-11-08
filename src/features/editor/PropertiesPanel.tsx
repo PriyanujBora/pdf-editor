@@ -26,6 +26,7 @@ import { layoutLine } from '@/lib/text/line-layout'
 import { measureCanvas } from '@/lib/text/measure-canvas'
 import { cn } from '@/lib/utils'
 import { useDoc } from '@/store/document'
+import { useSession } from '@/store/session'
 import { useUi } from '@/store/ui'
 import type { EditorElement, FontFamilyId, ImageElement, TextAlign, TextElement } from '@/types'
 import { deleteSelected } from './actions'
@@ -72,6 +73,7 @@ function plainPatch(el: TextElement) {
 function TextProps({ el }: { el: TextElement }) {
   const f = FONT_FAMILIES[el.font]
   const src = el.source
+  const notRemoved = useSession((s) => s.notRemoved[el.id])
   const missing = src
     ? el.override
       ? []
@@ -277,9 +279,14 @@ function TextProps({ el }: { el: TextElement }) {
           <p className="text-xs font-medium text-muted-foreground">Edits printed text</p>
           <p className="mt-1 line-clamp-2 break-words">{src.text}</p>
           <p className="mt-2 text-xs text-muted-foreground">
-            Words you didn’t change keep the PDF’s own letters and positions. Changed words are drawn on a patch over the
-            old ones — the old words are still in the file underneath and can be found by searching it.
+            Words you didn’t change keep the PDF’s own letters and positions. When you download, the old words are removed
+            from the file, so searching or copying won’t find them.
           </p>
+          {notRemoved && (
+            <p className="mt-2 text-xs font-medium text-destructive" role="alert">
+              The last download couldn’t remove the old text here ({notRemoved}): it was covered, but it’s still in the file.
+            </p>
+          )}
           <Button variant="ghost" className="mt-2 h-10 w-full justify-start gap-2 lg:h-8" onClick={deleteSelected}>
             <Undo /> Restore original
           </Button>

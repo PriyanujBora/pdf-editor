@@ -16,6 +16,8 @@ interface SessionState {
   encrypted: boolean
   /** Bookmark titles that point at each source page (index → titles). */
   bookmarks: Record<number, string[]>
+  /** Edits whose old text the last download could not remove (element id → reason). */
+  notRemoved: Record<string, string>
   pdf: PDFDocumentProxy | null
   sourcePages: SourcePageInfo[]
   assets: Record<string, ImageAsset>
@@ -33,6 +35,7 @@ export const useSession = create<SessionState>()((set, get) => ({
   password: '',
   encrypted: false,
   bookmarks: {},
+  notRemoved: {},
   pdf: null,
   sourcePages: [],
   assets: {},
@@ -41,6 +44,6 @@ export const useSession = create<SessionState>()((set, get) => ({
   addAsset: (a) => set((s) => ({ assets: { ...s.assets, [a.id]: a } })),
   close: () => {
     void get().pdf?.loadingTask.destroy()
-    set({ status: 'empty', progress: 0, fileName: '', bytes: null, password: '', encrypted: false, bookmarks: {}, pdf: null, sourcePages: [], assets: {} })
+    set({ status: 'empty', progress: 0, fileName: '', bytes: null, password: '', encrypted: false, bookmarks: {}, notRemoved: {}, pdf: null, sourcePages: [], assets: {} })
   },
 }))

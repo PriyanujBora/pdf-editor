@@ -363,9 +363,17 @@ export async function downloadPdf() {
   }
   const id = toast.loading('Preparing your PDF…')
   try {
-    const bytes = await exportPdf((v) => toast.loading(`Preparing your PDF… ${Math.round(v * 100)}%`, { id }), { keepEncryption })
+    const { bytes, notes } = await exportPdf((v) => toast.loading(`Preparing your PDF… ${Math.round(v * 100)}%`, { id }), { keepEncryption })
+    useSession.getState().set({ notRemoved: Object.fromEntries(notes.map((n) => [n.elementId, n.reason])) })
     downloadBytes(bytes, editedFileName(useSession.getState().fileName))
-    toast.success('Downloaded', { id, duration: 2500 })
+    if (notes.length)
+      // Honest at the moment it matters: the old words are still inside the downloaded file.
+      toast.warning(notes.length === 1 ? 'One edit couldn’t remove the old text' : `${notes.length} edits couldn’t remove the old text`, {
+        id,
+        duration: 12000,
+        description: `It’s covered on the page but still in the file (${notes[0].reason}). Don’t rely on these edits to hide information.`,
+      })
+    else toast.success('Downloaded', { id, duration: 2500 })
   } catch (err) {
     console.error(err)
     toast.error('Export failed. ' + (err instanceof Error ? err.message : ''), { id })
