@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { temporal } from 'zundo'
-import type { EditorElement, PageItem, Rotation } from '@/types'
+import type { EditorElement, FieldValue, PageItem, Rotation } from '@/types'
 
 /**
  * The undoable part of the app: page order/rotation and editor elements.
@@ -10,8 +10,12 @@ import type { EditorElement, PageItem, Rotation } from '@/types'
 export interface DocState {
   pages: PageItem[]
   elements: Record<string, EditorElement>
+  /** Form fields the user filled in (field name → value); absent = as in the file. */
+  formValues: Record<string, FieldValue>
 
-  reset: (pages: PageItem[], elements?: Record<string, EditorElement>) => void
+  reset: (pages: PageItem[], elements?: Record<string, EditorElement>, formValues?: Record<string, FieldValue>) => void
+  /** Typing into one field merges into one undo step, like text edits. */
+  setFormValue: (name: string, value: FieldValue) => void
   addElement: (el: EditorElement) => void
   /** Several elements in one undo step (Find & redact). */
   addElements: (els: EditorElement[]) => void
@@ -24,7 +28,7 @@ export interface DocState {
   removePage: (pageId: string) => void
 }
 
-type Tracked = Pick<DocState, 'pages' | 'elements'>
+type Tracked = Pick<DocState, 'pages' | 'elements' | 'formValues'>
 
 /**
  * Undo granularity. Discrete actions (add, delete, drag, page ops) each get
@@ -54,8 +58,14 @@ export const useDoc = create<DocState>()(
     (set) => ({
       pages: [],
       elements: {},
+      formValues: {},
 
-      reset: (pages, elements = {}) => set({ pages, elements }),
+      reset: (pages, elements = {}, formValues = {}) => set({ pages, elements, formValues }),
+
+      setFormValue: (name, value) => {
+        mergeKey = 'form:' + name
+        set((s) => ({ formValues: { ...s.formValues, [name]: value } }))
+      },
 
       addElement: (el) => set((s) => ({ elements: { ...s.elements, [el.id]: el } })),
 
@@ -113,8 +123,8 @@ export const useDoc = create<DocState>()(
     }),
     {
       limit: 200,
-      partialize: (s): Tracked => ({ pages: s.pages, elements: s.elements }),
-      equality: (a, b) => a.pages === b.pages && a.elements === b.elements,
+      partialize: (s): Tracked => ({ pages: s.pages, elements: s.elements, formValues: s.formValues }),
+      equality: (a, b) => a.pages === b.pages && a.elements === b.elements && a.formValues === b.formValues,
       handleSet: (handleSet) => mergeBursts(handleSet),
     },
   ),

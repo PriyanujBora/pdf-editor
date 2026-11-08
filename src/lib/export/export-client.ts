@@ -8,6 +8,8 @@ export interface ExportResult {
   notes: RemovalNote[]
   /** Present when the download redacts or cleans up; non-empty problems/leaks = no file (bytes empty). */
   redaction?: RedactionReport
+  /** Form fields that couldn't be written (name: reason). */
+  formNotes?: string[]
 }
 
 /** True when the download would be the original file: no edits, same pages in the same order. */
@@ -18,7 +20,8 @@ export function isUnchanged() {
   const hasEdits = Object.values(d.elements).some((el) => pageIds.has(el.pageId))
   const samePages = d.pages.length === s.sourcePages.length && d.pages.every((p, i) => p.srcIndex === i && p.rotation === 0)
   const cleanUp = Object.values(s.sanitize).some(Boolean)
-  return !hasEdits && samePages && !cleanUp
+  const form = Object.keys(d.formValues).length > 0 || s.form.flatten
+  return !hasEdits && samePages && !cleanUp && !form
 }
 
 /**
@@ -68,6 +71,8 @@ export async function exportPdf(
     scanPatches,
     imagePatches,
     sanitize: s.sanitize,
+    formValues: d.formValues,
+    flattenForm: s.form.flatten && s.form.fields > 0,
     bytes: s.bytes,
     password: s.password,
     keepEncryption,
@@ -85,7 +90,7 @@ export async function exportPdf(
       if (m.type === 'progress') onProgress?.(m.value)
       else {
         worker.terminate()
-        if (m.type === 'done') resolve({ bytes: m.bytes, notes: m.notes, redaction: m.redaction })
+        if (m.type === 'done') resolve({ bytes: m.bytes, notes: m.notes, redaction: m.redaction, formNotes: m.formNotes })
         else reject(new Error(m.message))
       }
     }

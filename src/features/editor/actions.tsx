@@ -18,7 +18,7 @@ import { apply, rotate, userRotation } from '@/lib/export/matrix'
 import { useDoc } from '@/store/document'
 import { useSession } from '@/store/session'
 import { useUi } from '@/store/ui'
-import type { EditorElement, OriginalFont, PageItem, PtRect, TextElement } from '@/types'
+import type { EditorElement, FieldValue, OriginalFont, PageItem, PtRect, TextElement } from '@/types'
 
 /** Last rendered canvas per page, used to sample colours. */
 export const renderedCanvases = new Map<string, { canvas: HTMLCanvasElement; scale: number }>()
@@ -141,7 +141,7 @@ export function editTextBlock(page: PageItem, block: TextBlock, at?: { x: number
 // tracking paused: if the line ends up exactly as printed, the draft element is dropped and nothing
 // is recorded; otherwise the whole session becomes a single undo step.
 
-let session: { id: string; pre: { pages: PageItem[]; elements: Record<string, EditorElement> } } | null = null
+let session: { id: string; pre: { pages: PageItem[]; elements: Record<string, EditorElement>; formValues: Record<string, FieldValue> } } | null = null
 
 export function isNoOpEdit(el: EditorElement | undefined): boolean {
   if (!el || el.kind !== 'text' || !el.source) return false
@@ -153,7 +153,7 @@ export function beginEditSession(id: string) {
   if (session?.id === id) return
   if (session) endEditSession(session.id)
   const d = useDoc.getState()
-  session = { id, pre: { pages: d.pages, elements: d.elements } }
+  session = { id, pre: { pages: d.pages, elements: d.elements, formValues: d.formValues } }
   useDoc.temporal.getState().pause()
 }
 
@@ -171,7 +171,7 @@ export function endEditSession(id: string) {
   t.resume()
   const now = useDoc.getState()
   const keys = new Set([...Object.keys(pre.elements), ...Object.keys(now.elements)])
-  const same = now.pages === pre.pages && [...keys].every((k) => now.elements[k] === pre.elements[k])
+  const same = now.pages === pre.pages && now.formValues === pre.formValues && [...keys].every((k) => now.elements[k] === pre.elements[k])
   if (!same) useDoc.temporal.setState((st) => ({ pastStates: [...st.pastStates, pre].slice(-200), futureStates: [] }))
 }
 
@@ -473,7 +473,7 @@ export async function downloadPdf() {
   }
   const id = toast.loading('Preparing your PDF…')
   try {
-    const { bytes, notes, redaction } = await exportPdf((v) => toast.loading(`Preparing your PDF… ${Math.round(v * 100)}%`, { id }), { keepEncryption })
+    const { bytes, notes, redaction, formNotes } = await exportPdf((v) => toast.loading(`Preparing your PDF… ${Math.round(v * 100)}%`, { id }), { keepEncryption })
     useSession.getState().set({ notRemoved: Object.fromEntries(notes.map((n) => [n.elementId, n.reason])) })
     if (redaction && (redaction.problems.length || redaction.leaks.length)) {
       toast.error('Nothing was downloaded', { id, duration: 5000 })
@@ -493,6 +493,11 @@ export async function downloadPdf() {
       }
     }
     downloadBytes(bytes, editedFileName(useSession.getState().fileName))
+    if (formNotes?.length)
+      toast.warning(formNotes.length === 1 ? 'A form field couldn’t be filled in' : `${formNotes.length} form fields couldn’t be filled in`, {
+        duration: 10000,
+        description: formNotes.slice(0, 3).join(' · '),
+      })
     const extra = redaction?.sanitizeNotes.length ? ' ' + redaction.sanitizeNotes.join(' ') : ''
     if (marks.length && !notes.length)
       toast.success('Redacted and verified: 0 matches remain', {

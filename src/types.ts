@@ -270,6 +270,12 @@ export interface RedactElement extends BaseElement {
   text?: string
 }
 
+/**
+ * A form field's value as the user set it (Phase 6): text, or a button's export value ('Off' = none),
+ * or the selected options of a choice field.
+ */
+export type FieldValue = string | string[]
+
 /** Document clean-up applied on download (Redact panel). */
 export interface SanitizeOptions {
   metadata: boolean

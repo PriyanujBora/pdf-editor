@@ -1,5 +1,5 @@
 import type { ImagePatch } from '@/lib/redact/images'
-import type { EditorElement, ImageAsset, PageItem, SanitizeOptions, SourcePageInfo } from '@/types'
+import type { EditorElement, FieldValue, ImageAsset, PageItem, SanitizeOptions, SourcePageInfo } from '@/types'
 
 export interface ExportRequest {
   bytes: Uint8Array
@@ -15,6 +15,9 @@ export interface ExportRequest {
   /** Redacted copies of the images under redaction marks, per page id. */
   imagePatches: Record<string, ImagePatch[]>
   sanitize: SanitizeOptions
+  /** Filled-in form fields, and whether to flatten the form into the pages. */
+  formValues: Record<string, FieldValue>
+  flattenForm: boolean
   /** Absolute URL of the app root, for fetching fonts from the worker. */
   baseUrl: string
 }
@@ -38,5 +41,5 @@ export interface RedactionReport {
 
 export type ExportResponse =
   | { type: 'progress'; value: number }
-  | { type: 'done'; bytes: Uint8Array; notes: RemovalNote[]; redaction?: RedactionReport }
+  | { type: 'done'; bytes: Uint8Array; notes: RemovalNote[]; redaction?: RedactionReport; formNotes?: string[] }
   | { type: 'error'; message: string }

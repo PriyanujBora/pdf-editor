@@ -1,5 +1,5 @@
 import { createStore, del, get, set, setMany } from 'idb-keyval'
-import type { EditorElement, ImageAsset, PageItem, SanitizeOptions } from '@/types'
+import type { EditorElement, FieldValue, ImageAsset, PageItem, SanitizeOptions } from '@/types'
 
 /**
  * Autosave to IndexedDB. Everything stays on this device. The password of an
@@ -14,12 +14,14 @@ export interface SavedMeta {
   savedAt: number
   /** Clean-up options of the Redact panel (version 3). */
   sanitize?: SanitizeOptions
+  /** Filled-in form fields (version 4). */
+  formValues?: Record<string, FieldValue>
   /**
    * 2 = text elements may carry `source` (edited printed lines). Version-1 saves load unchanged:
    * their edited lines are cover-based elements, which still render and export as before.
    * 3 = redaction marks (`kind: 'redact'`) and sanitize options.
    */
-  version: 1 | 2 | 3
+  version: 1 | 2 | 3 | 4
 }
 
 export async function saveSource(fileName: string, bytes: Uint8Array) {
@@ -35,7 +37,7 @@ export async function saveSource(fileName: string, bytes: Uint8Array) {
 }
 
 export async function saveState(meta: Omit<SavedMeta, 'savedAt' | 'version'>) {
-  await set('meta', { ...meta, savedAt: Date.now(), version: 3 } satisfies SavedMeta, store)
+  await set('meta', { ...meta, savedAt: Date.now(), version: 4 } satisfies SavedMeta, store)
 }
 
 export async function saveAssets(assets: Record<string, ImageAsset>) {

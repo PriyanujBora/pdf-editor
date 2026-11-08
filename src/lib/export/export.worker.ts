@@ -38,6 +38,7 @@ import type { Cover, FontFamilyId, ImageElement, RedactElement, TextElement } fr
 import { collectGarbage, privateResources, pruneDeletedPages, rebuildPageTree, removeAnnotations } from './doc-structure'
 import { annotationsUnder, redactPage, type Box, type ImageSwap } from '@/lib/content/redact'
 import { sanitize } from './sanitize'
+import { fillForm } from './fill-form'
 import { findLeaks, scrubStrings } from './verify-scan'
 import { compatFontkit } from './fontkit-compat'
 import { applySourceEncryption, readEncryption } from './keep-encryption'
@@ -50,9 +51,9 @@ declare const self: DedicatedWorkerGlobalScope
 self.onmessage = async (e: MessageEvent<ExportRequest>) => {
   try {
     const notes: RemovalNote[] = []
-    const out: { redaction?: RedactionReport } = {}
+    const out: { redaction?: RedactionReport; formNotes?: string[] } = {}
     const bytes = await buildPdf(e.data, notes, out)
-    self.postMessage({ type: 'done', bytes, notes, redaction: out.redaction } satisfies ExportResponse, [bytes.buffer])
+    self.postMessage({ type: 'done', bytes, notes, redaction: out.redaction, formNotes: out.formNotes } satisfies ExportResponse, [bytes.buffer])
   } catch (err) {
     self.postMessage({ type: 'error', message: err instanceof Error ? err.message : String(err) } satisfies ExportResponse)
   }
@@ -60,7 +61,7 @@ self.onmessage = async (e: MessageEvent<ExportRequest>) => {
 
 const progress = (value: number) => self.postMessage({ type: 'progress', value } satisfies ExportResponse)
 
-async function buildPdf(req: ExportRequest, notes: RemovalNote[], out: { redaction?: RedactionReport }): Promise<Uint8Array> {
+async function buildPdf(req: ExportRequest, notes: RemovalNote[], out: { redaction?: RedactionReport; formNotes?: string[] }): Promise<Uint8Array> {
   // Edit the source document itself (not copies of its pages in a new one) so forms, outlines,
   // named destinations, page labels, tags, metadata and attachments survive.
   const enc = req.keepEncryption ? await readEncryption(req.bytes, req.password) : null
@@ -204,6 +205,10 @@ async function buildPdf(req: ExportRequest, notes: RemovalNote[], out: { redacti
     }
     progress(0.15 + (0.6 * (i + 1)) / req.pages.length)
   }
+
+  // Form values (Phase 6): before redaction, so fields under a mark still leave with their values.
+  const filled = await fillForm(doc, req.formValues ?? {}, !!req.flattenForm, (family) => fonts.get(family, false, false))
+  out.formNotes = filled.notes
 
   // Redaction (Phase 4): a second pass over the finished page content — edits and added text
   // included — once pdf-lib has written its fonts (their widths locate the glyphs).

@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import type { RenderTask } from 'pdfjs-dist'
 import { useSession } from '@/store/session'
+import { loadPdfJs } from '@/lib/pdf/pdfjs'
 import { renderedCanvases } from './actions'
 
 /** iOS Safari refuses canvases above ~16.7 MP. */
@@ -15,6 +16,8 @@ interface Props {
   /** Displayed (user-rotated) page size in points. */
   width: number
   height: number
+  /** The file has form fields: they are drawn by the form layer, not on the canvas. */
+  forms?: boolean
 }
 
 /**
@@ -22,7 +25,7 @@ interface Props {
  * done, so re-renders on zoom never flash blank. Until then the previous
  * canvas is simply stretched by CSS.
  */
-export function PageCanvas({ pageId, srcIndex, rotation, zoom, width, height }: Props) {
+export function PageCanvas({ pageId, srcIndex, rotation, zoom, width, height, forms }: Props) {
   const holder = useRef<HTMLDivElement>(null)
   const pdf = useSession((s) => s.pdf)
 
@@ -46,7 +49,8 @@ export function PageCanvas({ pageId, srcIndex, rotation, zoom, width, height }: 
           canvas.height = Math.ceil(viewport.height)
           canvas.className = 'absolute inset-0 size-full'
           canvas.setAttribute('aria-hidden', 'true')
-          task = page.render({ canvas, viewport })
+          const { AnnotationMode } = await loadPdfJs()
+          task = page.render({ canvas, viewport, annotationMode: forms ? AnnotationMode.ENABLE_FORMS : AnnotationMode.ENABLE })
           await task.promise
           if (cancelled || !holder.current) return
           holder.current.replaceChildren(canvas)
@@ -63,7 +67,7 @@ export function PageCanvas({ pageId, srcIndex, rotation, zoom, width, height }: 
       clearTimeout(timer)
       task?.cancel()
     }
-  }, [pdf, pageId, srcIndex, rotation, zoom, width, height])
+  }, [pdf, pageId, srcIndex, rotation, zoom, width, height, forms])
 
   useEffect(() => () => void renderedCanvases.delete(pageId), [pageId])
 

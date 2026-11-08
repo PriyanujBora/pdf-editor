@@ -7,6 +7,7 @@ import type { PageItem } from '@/types'
 import { InlineTextEditor } from './InlineTextEditor'
 import { PageCanvas } from './PageCanvas'
 import { PageOverlay } from './PageOverlay'
+import { FormLayer } from './FormLayer'
 
 interface Props {
   page: PageItem
@@ -20,6 +21,7 @@ export const PageView = memo(function PageView({ page, index, zoom }: Props) {
   const info = useSession((s) => s.sourcePages[page.srcIndex])
   const visible = useInView(ref, '[data-testid="viewer"]', '150% 150%')
   const editingId = useUi((s) => s.editingId)
+  const hasForm = useSession((s) => s.form.fields > 0)
   const editingEl = useDoc((s) => {
     const el = editingId ? s.elements[editingId] : undefined
     return el?.kind === 'text' && el.pageId === page.id ? el : null
@@ -48,8 +50,10 @@ export const PageView = memo(function PageView({ page, index, zoom }: Props) {
             zoom={zoom}
             width={dispW}
             height={dispH}
+            forms={hasForm}
           />
           <PageOverlay page={page} width={info.width} height={info.height} zoom={zoom} />
+          {hasForm && <FormLayer page={page} info={info} zoom={zoom} />}
           {editingEl && (
             <InlineTextEditor key={editingEl.id} el={editingEl} page={page} width={info.width} height={info.height} zoom={zoom} />
           )}

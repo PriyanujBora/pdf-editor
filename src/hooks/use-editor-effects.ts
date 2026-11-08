@@ -10,13 +10,13 @@ export function useAutosave() {
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined
     const flush = () => {
-      const { pages, elements } = useDoc.getState()
+      const { pages, elements, formValues } = useDoc.getState()
       const { fileName, status, sanitize } = useSession.getState()
       if (status !== 'ready') return
-      void saveState({ fileName, pages, elements, sanitize }).catch(() => {})
+      void saveState({ fileName, pages, elements, sanitize, formValues }).catch(() => {})
     }
     const unsubDoc = useDoc.subscribe((s, prev) => {
-      if (s.pages === prev.pages && s.elements === prev.elements) return
+      if (s.pages === prev.pages && s.elements === prev.elements && s.formValues === prev.formValues) return
       clearTimeout(timer)
       timer = setTimeout(flush, 600)
     })

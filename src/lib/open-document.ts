@@ -4,7 +4,8 @@ import { uid } from '@/lib/ids'
 import { clearHistory, useDoc } from '@/store/document'
 import { NO_SANITIZE, useSession } from '@/store/session'
 import { useUi } from '@/store/ui'
-import type { EditorElement, ImageAsset, PageItem, Rotation, SanitizeOptions, SourcePageInfo } from '@/types'
+import type { PDFDocumentProxy } from 'pdfjs-dist'
+import type { EditorElement, FieldValue, ImageAsset, PageItem, Rotation, SanitizeOptions, SourcePageInfo } from '@/types'
 
 export const MAX_FILE_BYTES = 512 * 1024 * 1024
 
@@ -19,7 +20,13 @@ export class OpenFailure extends Error {
 interface OpenOptions {
   password?: string
   /** When resuming an autosaved session. */
-  restore?: { pages: PageItem[] | null; elements: Record<string, EditorElement>; assets: Record<string, ImageAsset>; sanitize?: SanitizeOptions }
+  restore?: {
+    pages: PageItem[] | null
+    elements: Record<string, EditorElement>
+    assets: Record<string, ImageAsset>
+    sanitize?: SanitizeOptions
+    formValues?: Record<string, FieldValue>
+  }
 }
 
 /**
@@ -81,9 +88,11 @@ export async function openDocument(bytes: Uint8Array, fileName: string, opts: Op
       import('@/lib/scan/compose').then((m) => m.clearScanCaches()),
       import('@/lib/scan/pixels').then((m) => m.clearPixelCache()),
       import('@/lib/redact/find').then((m) => m.clearSearchCache()),
+      import('@/lib/forms').then((m) => m.clearFormCache()),
     ])
     const encrypted = !!opts.password || (await pdf.getPermissions().catch(() => null)) !== null
     const bookmarks = await bookmarksByPage(pdf).catch(() => ({}))
+    const form = await formInfo(pdf).catch(() => ({ fields: 0, calculated: false }))
     useSession.getState().set({
       status: 'ready',
       encrypted,
@@ -96,8 +105,9 @@ export async function openDocument(bytes: Uint8Array, fileName: string, opts: Op
       sourcePages,
       assets: restored?.assets ?? {},
       sanitize: { ...NO_SANITIZE, ...restored?.sanitize },
+      form: { ...form, flatten: false },
     })
-    useDoc.getState().reset(pages, restored?.elements ?? {})
+    useDoc.getState().reset(pages, restored?.elements ?? {}, restored?.formValues ?? {})
     clearHistory()
     useUi.getState().set({ selectedId: null, editingId: null, tool: 'select', currentPageId: pages[0]?.id ?? null })
 
@@ -132,6 +142,16 @@ async function bookmarksByPage(pdf: Awaited<ReturnType<Awaited<ReturnType<typeof
   return out
 }
 
+/** How many form fields the file has, and whether scripts calculate some of them. */
+async function formInfo(pdf: PDFDocumentProxy) {
+  // pdf.js 6 returns a Map (older versions a plain object).
+  const raw = ((await pdf.getFieldObjects()) ?? {}) as unknown
+  const fields: [string, { actions?: Record<string, unknown> }[]][] = raw instanceof Map ? [...raw] : Object.entries(raw as object)
+  const calcIds = ((await (pdf as unknown as { getCalculationOrderIds?: () => Promise<string[] | null> }).getCalculationOrderIds?.()) ?? []) as string[]
+  const calculated = calcIds.length > 0 || fields.some(([, ws]) => ws.some((w) => !!w.actions?.Calculate))
+  return { fields: fields.length, calculated }
+}
+
 export async function openFile(file: File, password?: string) {
   if (file.size > MAX_FILE_BYTES) {
     throw new OpenFailure({
@@ -148,15 +168,21 @@ export async function resumeSaved(password?: string) {
   if (!saved) throw new OpenFailure({ kind: 'invalid', message: 'The saved session could not be found.' })
   return openDocument(saved.bytes, saved.fileName, {
     password,
-    restore: { pages: saved.meta?.pages ?? null, elements: saved.meta?.elements ?? {}, assets: saved.assets, sanitize: saved.meta?.sanitize },
+    restore: {
+      pages: saved.meta?.pages ?? null,
+      elements: saved.meta?.elements ?? {},
+      assets: saved.assets,
+      sanitize: saved.meta?.sanitize,
+      formValues: saved.meta?.formValues,
+    },
   })
 }
 
 /** Back to the landing page. The autosave is kept so it can be resumed. */
 export async function closeDocument() {
-  const { pages, elements } = useDoc.getState()
+  const { pages, elements, formValues } = useDoc.getState()
   const { fileName, status, sanitize } = useSession.getState()
-  if (status === 'ready') await saveState({ fileName, pages, elements, sanitize }).catch(() => {})
+  if (status === 'ready') await saveState({ fileName, pages, elements, sanitize, formValues }).catch(() => {})
   useSession.getState().close()
   useDoc.getState().reset([], {})
   clearHistory()

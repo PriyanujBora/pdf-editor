@@ -32,6 +32,7 @@ import type { EditorElement, FontFamilyId, ImageElement, TextAlign, TextElement 
 import { deleteSelected, editParagraphLine, shrinkToFit } from './actions'
 import { TOOLS } from './tools'
 import { RedactPanel } from './RedactPanel'
+import { FormPanel } from './FormPanel'
 
 const SWATCHES = ['#111111', '#ffffff', '#dc2626', '#ea580c', '#16a34a', '#2563eb', '#7c3aed']
 
@@ -383,6 +384,7 @@ export function PropertiesPanel({ className }: { className?: string }) {
           <MousePointerClick className="mt-0.5 size-4 shrink-0" />
           <p>{t && tool !== 'select' ? t.hint + '.' : 'Tap any text on the page to edit it, or select something you added.'}</p>
         </div>
+        <FormPanel />
         {marks > 0 && (
           <p className="rounded-xl border border-destructive/30 px-3 py-2 text-xs">
             {marks} {marks === 1 ? 'area is' : 'areas are'} marked for redaction — removed when you download.

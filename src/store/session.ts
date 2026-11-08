@@ -29,6 +29,8 @@ interface SessionState {
   notRemoved: Record<string, string>
   /** Clean-up applied on download (Redact panel). */
   sanitize: SanitizeOptions
+  /** Form fields in the file, whether some are calculated by scripts, and the flatten choice. */
+  form: { fields: number; calculated: boolean; flatten: boolean }
   pdf: PDFDocumentProxy | null
   sourcePages: SourcePageInfo[]
   assets: Record<string, ImageAsset>
@@ -48,6 +50,7 @@ export const useSession = create<SessionState>()((set, get) => ({
   bookmarks: {},
   notRemoved: {},
   sanitize: NO_SANITIZE,
+  form: { fields: 0, calculated: false, flatten: false },
   pdf: null,
   sourcePages: [],
   assets: {},
@@ -56,6 +59,6 @@ export const useSession = create<SessionState>()((set, get) => ({
   addAsset: (a) => set((s) => ({ assets: { ...s.assets, [a.id]: a } })),
   close: () => {
     void get().pdf?.loadingTask.destroy()
-    set({ status: 'empty', progress: 0, fileName: '', bytes: null, password: '', encrypted: false, bookmarks: {}, notRemoved: {}, sanitize: NO_SANITIZE, pdf: null, sourcePages: [], assets: {} })
+    set({ status: 'empty', progress: 0, fileName: '', bytes: null, password: '', encrypted: false, bookmarks: {}, notRemoved: {}, sanitize: NO_SANITIZE, form: { fields: 0, calculated: false, flatten: false }, pdf: null, sourcePages: [], assets: {} })
   },
 }))
