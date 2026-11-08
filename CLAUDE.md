@@ -29,6 +29,7 @@ npm run fixtures       # generate tests/fixtures/*.pdf (text-heavy, multi-page, 
 npm run test:e2e       # Playwright suite at 390/820/1440px against E2E_URL (default http://localhost:5199/)
 npm run test:prod      # smoke test of the built app under wrangler dev (CSP, export, offline)
 npm run test:fidelity  # export keeps forms/outlines/tags/attachments/labels/encryption (dev server + tests/.venv)
+npm run test:redaction # redact through the UI, then pdftotext/pypdf/PDFium/raw-object/pixel checks (same needs)
 npm run test:edit-stability [-- filter]  # every editable line of fixtures + tests/corpus: no-op, editing,
                        # same-length word, missing glyph, size (needs dev server + tests/.venv, see tests/tools)
 npm run corpus:word    # real Word "Save as PDF" output into tests/corpus (Windows + Word only)
@@ -68,6 +69,14 @@ src/
   lib/text/fallback.ts      stand-in family per PDF font: names → metric clones, else width fit
   lib/scan/                 scan-matched edits: fit.ts (fit a scanned line), compose.ts (build the
                             patch), pixels.ts (raw scan pixels), raster.ts, source.ts (paper/ink model)
+  lib/content/remove-text.ts  content-stream tokenizer/interpreter/rewriter (worker): edits + redaction
+  lib/content/redact.ts     apply redaction marks to a page's content (glyphs, image swaps, paths)
+  lib/redact/               main thread: find.ts (search lines, presets, word at point), images.ts
+                            (black out image pixels under marks), verify.ts (re-read the output),
+                            geometry.ts (glyph-under-mark test shared with the worker)
+  lib/export/sanitize.ts    clean-up options (metadata, JS, attachments, hidden layers, comments, values)
+  lib/export/verify-scan.ts leak scan of every object for marked strings; bookmark/tag scrubbing
+  features/editor/Redact*   RedactPanel (Find & redact, marks, clean-up), redact-actions, redact-download
 public/fonts/               bundled TTFs — Inter, Roboto, Tinos (Times-metric, Apache-2.0), Noto Serif,
                             Noto Sans Bengali/Devanagari, and metric clones Arimo (Arial/Helvetica),
                             Carlito (Calibri), Cousine (Courier), Gelasio (Georgia) — OFL; the clones are
@@ -92,6 +101,9 @@ public/fonts/               bundled TTFs — Inter, Roboto, Tinos (Times-metric,
   `cover` elements (old autosaves, scan fallback) still render the old way.
 - `ImageElement { x, y, width, height, rotation, assetId }`. Image bytes live in `session.assets`, not in
   undo history.
+- `RedactElement { x, y, width, height, text? }` (rotation always 0): a redaction mark, undoable like any
+  element ("Mark all" is one step via `addElements`). `text` = what Find & redact / a tapped word marked;
+  it is searched for again after applying. Clean-up options live in `session.sanitize` (autosave v3).
 - Editing a printed line is an **edit session** (`beginEditSession`/`endEditSession` in actions.ts): undo is
   paused; leaving with the line exactly as printed drops the draft (no element, no undo step); otherwise the
   session is one undo step.
@@ -113,10 +125,15 @@ public/fonts/               bundled TTFs — Inter, Roboto, Tinos (Times-metric,
    `encodeGlyph`). Italic on a face without italics = synthetic oblique (shear 0.2), like browsers.
    Edited printed lines (`drawSourceLine`): same layout as the editor; original glyphs reuse the font
    dictionary (incl. non-embedded and Type3, for moved glyphs) with the same codes, stand-ins are embedded.
+4b. **Redaction** (marks present): `doc.flush()` first (so pdf-lib's own fonts have widths), then a second
+   pass per marked page over the finished content (`redactPage`), annotations under marks removed
+   (`removeAnnotations`: a widget takes its whole field), black boxes appended, marked strings scrubbed
+   from bookmark titles and tag texts. Then `sanitize` if any option is on.
 5. `rebuildPageTree` (one flat /Pages in output order, inheritable attributes pushed to leaves),
    `pruneDeletedPages` (outline items, named dests, links, tags + ParentTree, form fields, OpenAction;
    page labels rewritten per surviving page), `flush()`, `collectGarbage`, then optional
    `applySourceEncryption` (keep protection) — all in `lib/export/doc-structure.ts` / `keep-encryption.ts`.
+   Redacted/cleaned exports run `findLeaks` after GC and before encryption; any problem or leak → no bytes.
 6. `save({ useObjectStreams: true, updateFieldAppearances: false })`. `npm run test:fidelity` checks it all
    (pikepdf/pypdf/PDFium/Ghostscript), including both passwords and the permissions.
 
@@ -219,6 +236,21 @@ public/fonts/               bundled TTFs — Inter, Roboto, Tinos (Times-metric,
   vertical writing, non-Identity CMaps, fonts without widths, nested forms, glyph not found.
   PDFium truncates fractional widths, so glyphs after a removed word may move ≤ n/1000 em there
   (agreed tolerance; exact in pdf.js/Acrobat/Preview). The editor still shows patches while editing.
+- **Redaction** (`RedactElement`, Phase 4) — never weaken these:
+  - Glyphs: removed when a mark covers their centre or ≥ 25 % of their box (advance × 0.8 em up, 0.25 em
+    down — `lib/redact/geometry.ts`, the same test the verify step uses). Invisible OCR text included.
+    Marks from OCR text are padded (OCR boxes only roughly fit the scanned ink).
+  - Images: page-level image XObjects a mark touches are decoded on the main thread (pdf.js, any filter),
+    blacked out under the marks, re-encoded (JPEG if many tones, else PNG) and swapped in per drawing,
+    matched by placement CTM; the old name leaves the page's resources so the original isn't reachable.
+  - Paths: removed only when entirely under a mark (operators + coordinates); others stay, covered.
+  - Refuse (download blocked, reasons listed) rather than cover: clip text, unreadable fonts, nested
+    forms, inline images, stencil masks, images inside forms, undecodable images; images you added or
+    scan-edit patches under a mark are refused before export.
+  - After export: the worker scans every object (strings, decoded non-content streams, BDC properties)
+    for marked strings; the main thread re-opens the output with pdf.js: no glyph under a mark, no
+    annotation touching one, marked strings no more frequent than their unmarked occurrences. Either
+    failing → nothing is downloaded.
 
 ## Workflow
 

@@ -1,7 +1,7 @@
 # Free PDF Editor
 
-Edit PDFs in the browser — change existing text, add text and images, reorder/rotate/delete pages,
-download. Everything runs on your device; no file is ever uploaded. Installable and works offline.
+Edit PDFs in the browser — change existing text, add text and images, redact, reorder/rotate/delete
+pages, download. Everything runs on your device; no file is ever uploaded. Installable and works offline.
 
 ## Run locally
 
@@ -45,3 +45,8 @@ npx wrangler deploy
 - Edited existing text is really removed from the downloaded file: the old words are taken out of the
   page's content stream, so copying, searching and text extraction no longer find them. Only when that's
   impossible (rare fonts, text used as a clip) is the old text covered instead, and the app says so.
+- Redaction removes what is under each mark from the file — text (including invisible OCR text), image
+  pixels, drawings, comments, form fields — then draws a black box. Find & redact searches words, regular
+  expressions and common patterns (emails, phone numbers, PAN, Aadhaar, card numbers). Optional clean-up
+  removes metadata, JavaScript, attachments, hidden layers, comments and form values. The result is opened
+  again and checked before it is saved; if anything marked can still be found, nothing is downloaded.

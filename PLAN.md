@@ -384,6 +384,26 @@ comments, and form data by choice.
 
 **Risks**: text inside Form XObjects shared across pages must be cloned per page; image re-encode cost on big scans.
 
+**As built** (`npm run test:redaction`):
+
+- Marks are elements (`RedactElement`), so undo, autosave and selection work as for everything else.
+- Dragging marks an area; a tap marks the word under it, not the whole line, because words are the
+  common target and dragging covers a line.
+- Find & redact covers visible and invisible OCR text. Marks over OCR text are padded, since OCR boxes
+  only roughly fit the scanned ink.
+- Redaction runs as a second pass over the finished page content, after `flush()`, so edits and added text
+  under a mark are removed too.
+- Marked strings in bookmark titles and tag texts are replaced with █.
+- The download is refused (with reasons) for:
+  - inline images, stencil masks and images inside forms under a mark;
+  - clip text and unreadable fonts;
+  - added images or scan-edit patches that overlap a mark;
+  - any leak found by the worker's object scan or the pdf.js re-read.
+- Not done:
+  - paths that only cross a mark are kept (they are covered by the box);
+  - hidden-layer content inside form XObjects is not removed (the app says so);
+  - OCMD visibility expressions are kept.
+
 ### Phase 5 — Paragraph editing with reflow
 
 - Group lines into paragraphs: same column edge or centre/right alignment, consistent leading, same dominant run style, no large gap. Detect justification.
