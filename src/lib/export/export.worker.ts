@@ -39,6 +39,7 @@ import { collectGarbage, privateResources, pruneDeletedPages, rebuildPageTree, r
 import { annotationsUnder, redactPage, type Box, type ImageSwap } from '@/lib/content/redact'
 import { sanitize } from './sanitize'
 import { fillForm } from './fill-form'
+import { addAnnotation } from './annotations'
 import { findLeaks, scrubStrings } from './verify-scan'
 import { compatFontkit } from './fontkit-compat'
 import { applySourceEncryption, readEncryption } from './keep-encryption'
@@ -202,6 +203,7 @@ async function buildPdf(req: ExportRequest, notes: RemovalNote[], out: { redacti
       if (el.kind === 'text') {
         if (!drawOriginalText(page, toPdf, el, originals)) await drawText(page, toPdf, el, fonts)
       } else if (el.kind === 'image') await drawImage(page, toPdf, el, req, images, doc)
+      else if (el.kind === 'annot') addAnnotation(page, toPdf, el)
     }
     progress(0.15 + (0.6 * (i + 1)) / req.pages.length)
   }

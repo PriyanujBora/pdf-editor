@@ -276,6 +276,31 @@ export interface RedactElement extends BaseElement {
  */
 export type FieldValue = string | string[]
 
+export type AnnotType = 'highlight' | 'underline' | 'strike' | 'note' | 'ink' | 'rect' | 'arrow'
+
+/**
+ * A real PDF annotation the user adds (Phase 6): text markup over printed text, sticky notes, ink,
+ * rectangles, arrows. Geometry is relative to (x, y) (page space) so moving it is just x/y; the export
+ * writes a standard annotation with an appearance stream. Rotation is always 0.
+ */
+export interface AnnotElement extends BaseElement {
+  kind: 'annot'
+  type: AnnotType
+  color: string
+  /** Bounding box size (rectangles, notes, markup). */
+  width: number
+  height: number
+  /** Text markup: one rectangle per line of text, relative to (x, y). */
+  quads?: PtRect[]
+  /** Ink strokes, or the arrow as [[x0, y0, x1, y1]]: flat point lists relative to (x, y). */
+  points?: number[][]
+  strokeWidth?: number
+  /** The comment (sticky notes; optional on the others). */
+  note?: string
+  /** Text under a markup annotation. */
+  text?: string
+}
+
 /** Document clean-up applied on download (Redact panel). */
 export interface SanitizeOptions {
   metadata: boolean
@@ -288,7 +313,7 @@ export interface SanitizeOptions {
 
 export type { OriginalFont }
 
-export type EditorElement = TextElement | ImageElement | RedactElement
+export type EditorElement = TextElement | ImageElement | RedactElement | AnnotElement
 
 export interface ImageAsset {
   id: string

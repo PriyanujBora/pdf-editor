@@ -7,6 +7,7 @@ import { useDoc } from '@/store/document'
 import { useUi } from '@/store/ui'
 import { ChoiceDialog } from './ChoiceDialog'
 import { SignatureDialog } from './SignatureDialog'
+import { AnnotateBar } from './AnnotateBar'
 import { MobileToolbar } from './MobileToolbar'
 import { PropertiesPanel } from './PropertiesPanel'
 import { Thumbnails } from './Thumbnails'
@@ -44,6 +45,7 @@ export default function Editor() {
             </aside>
             <main className="relative min-w-0 flex-1">
               <Viewer />
+              <AnnotateBar className="top-3" />
             </main>
             <aside className="w-72 shrink-0 overflow-y-auto border-l bg-background" aria-label="Properties">
               <PropertiesPanel />
@@ -61,6 +63,7 @@ export default function Editor() {
       <MobileTopBar />
       <main className="relative min-h-0 flex-1">
         <Viewer />
+        <AnnotateBar className="bottom-3" />
       </main>
       <MobileToolbar />
       <ChoiceDialog />

@@ -9,7 +9,7 @@ import { getTextBlocks, type TextBlock } from '@/lib/pdf/text-blocks'
 import { useDoc } from '@/store/document'
 import { useSession } from '@/store/session'
 import { useUi } from '@/store/ui'
-import type { EditorElement, PageItem, PtRect } from '@/types'
+import type { AnnotElement, EditorElement, PageItem, PtRect } from '@/types'
 import { createTextAt, editTextBlock } from './actions'
 import { ImageNode } from './elements/ImageNode'
 import { TextNode } from './elements/TextNode'
@@ -18,6 +18,10 @@ import { SourceTextNode } from './elements/SourceTextNode'
 import { RedactNode } from './elements/RedactNode'
 import { addAreaMark, markWordAt, MIN_MARK } from './redact-actions'
 import { placeSignature } from './sign-actions'
+import { AnnotNode, AnnotShape } from './elements/AnnotNode'
+import { createAnnot } from './annot-actions'
+import { selectText } from '@/lib/annotations'
+import { searchLines, wordAt, type SearchLine } from '@/lib/redact/find'
 import { activeInput } from './active-input'
 import { isScanText } from '@/lib/scan/compose'
 import { caretAt, type LineLayout } from '@/lib/text/line-layout'
@@ -63,6 +67,9 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
   const [blocks, setBlocks] = useState<TextBlock[] | null>(null)
   /** Area mark being dragged out with the Redact tool. */
   const [draft, setDraft] = useState<PtRect | null>(null)
+  /** Annotation being drawn (absolute page space), and the page's text for markup. */
+  const [annotDraft, setAnnotDraft] = useState<{ type: AnnotElement['type']; quads?: PtRect[]; points?: number[][]; rect?: PtRect } | null>(null)
+  const [lines, setLines] = useState<SearchLine[] | null>(null)
   const drawing = useRef<{ x0: number; y0: number; cancel: () => void } | null>(null)
   /** Latest layout of each edited source line (caret placement from pointer x). */
   const layouts = useRef(new Map<string, LineLayout>())
@@ -165,7 +172,7 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
   const onStageTap = (e: KEvt) => {
     if (e.target !== e.target.getStage()) return
     const ui = useUi.getState()
-    if (ui.tool === 'redact') return // marks are made on press/release (onRedactPress)
+    if (ui.tool === 'redact' || ui.tool === 'annotate') return // made on press/release (onRedactPress, onAnnotPress)
     if (ui.tool === 'sign') {
       const pos = groupRef.current?.getRelativePointerPosition()
       if (pos && ui.pendingSign) placeSignature(page, pos.x, pos.y)
@@ -231,6 +238,86 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
 
   useEffect(() => () => drawing.current?.cancel(), [])
 
+  useEffect(() => {
+    if (tool !== 'annotate' || !pdf || lines) return
+    let alive = true
+    void pdf
+      .getPage(page.srcIndex + 1)
+      .then((p) => searchLines(p, String(page.srcIndex)))
+      .then((l) => alive && setLines(l))
+    return () => {
+      alive = false
+    }
+  }, [tool, pdf, page.srcIndex, lines])
+
+  /** Annotate tool: drag across text to mark it up (a tap marks a word); draw ink, rectangles, arrows; tap for a note. */
+  const onAnnotPress = (e: Konva.KonvaEventObject<PointerEvent>) => {
+    const ui = useUi.getState()
+    if (ui.tool !== 'annotate' || e.target !== e.target.getStage() || !e.evt.isPrimary) return
+    const stage = e.target.getStage()
+    const start = groupRef.current?.getRelativePointerPosition()
+    if (!stage || !start) return
+    ui.set({ selectedId: null })
+    const type = ui.annotTool
+    const markup = type === 'highlight' || type === 'underline' || type === 'strike'
+    const ink: number[] = [start.x, start.y]
+    let last = start
+    let moved = false
+    const pos = (ev: PointerEvent) => {
+      stage.setPointersPositions(ev)
+      return groupRef.current?.getRelativePointerPosition() ?? start
+    }
+    const geometry = (p: { x: number; y: number }) => {
+      if (markup) return { quads: lines ? selectText(lines, start.x, start.y, p.x, p.y).quads : [] }
+      if (type === 'ink') return { points: [ink.slice()] }
+      if (type === 'arrow') return { points: [[start.x, start.y, p.x, p.y]] }
+      return { rect: { x: Math.min(start.x, p.x), y: Math.min(start.y, p.y), width: Math.abs(p.x - start.x), height: Math.abs(p.y - start.y) } }
+    }
+    const move = (ev: PointerEvent) => {
+      if (ev.pointerId !== e.evt.pointerId) return
+      const p = pos(ev)
+      if (Math.hypot(p.x - start.x, p.y - start.y) > 2) moved = true
+      if (!moved || type === 'note') return
+      if (type === 'ink' && Math.hypot(p.x - last.x, p.y - last.y) > 0.8) {
+        ink.push(p.x, p.y)
+        last = p
+      }
+      setAnnotDraft({ type, ...geometry(p) })
+    }
+    const cleanup = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', cleanup)
+      setAnnotDraft(null)
+    }
+    const up = (ev: PointerEvent) => {
+      if (ev.pointerId !== e.evt.pointerId) return
+      const p = pos(ev)
+      cleanup()
+      if (type === 'note') return void createAnnot(page.id, 'note', { at: p })
+      if (markup) {
+        if (!lines) return
+        const sel = moved ? selectText(lines, start.x, start.y, p.x, p.y) : (() => {
+          const w = wordAt(lines, start.x, start.y)
+          return w ? { quads: [w.rect], text: w.text } : { quads: [], text: '' }
+        })()
+        if (!sel.quads.length) {
+          toast('Drag across text to mark it', { id: 'annot-hint', description: 'Or tap a word.' })
+          return
+        }
+        return void createAnnot(page.id, type, sel)
+      }
+      if (!moved) return
+      const g = geometry(p)
+      if (type === 'rect' && (g.rect!.width < 3 || g.rect!.height < 3)) return
+      if (type === 'ink' && ink.length < 4) return
+      createAnnot(page.id, type, g)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', cleanup)
+  }
+
   const handlersFor = useCallback((el: EditorElement) => {
     const select = () => {
       const ui = useUi.getState()
@@ -292,7 +379,7 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
       onPointerDown: (e: Konva.KonvaEventObject<PointerEvent>) => {
         // Mouse/pen select on press so a drag can start immediately; touch waits for a tap.
         const t = useUi.getState().tool
-        if (e.evt.pointerType !== 'touch' && (t === 'select' || (t === 'redact' && el.kind === 'redact'))) {
+        if (e.evt.pointerType !== 'touch' && (t === 'select' || (t === 'redact' && el.kind === 'redact') || (t === 'annotate' && el.kind === 'annot'))) {
           e.cancelBubble = true
           pressedSelected = useUi.getState().selectedId === el.id
           select()
@@ -353,11 +440,14 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
       className="absolute inset-0"
       onClick={onStageTap}
       onTap={onStageTap}
-      onPointerDown={onRedactPress}
+      onPointerDown={(e) => {
+        onRedactPress(e)
+        onAnnotPress(e)
+      }}
       style={{
-        cursor: tool === 'text' ? 'text' : tool === 'redact' || tool === 'sign' ? 'crosshair' : 'default',
-        // One finger draws marks with the Redact tool (two fingers still zoom).
-        touchAction: tool === 'redact' ? 'none' : undefined,
+        cursor: tool === 'text' ? 'text' : tool === 'redact' || tool === 'sign' || tool === 'annotate' ? 'crosshair' : 'default',
+        // One finger draws marks with the Redact and Annotate tools (two fingers still zoom).
+        touchAction: tool === 'redact' || tool === 'annotate' ? 'none' : undefined,
       }}
     >
       <Layer>
@@ -402,7 +492,7 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
             />
           ))}
 
-          <Group listening={tool !== 'redact'}>
+          <Group listening={tool === 'select' || tool === 'text' || tool === 'edit-text'}>
           {elements.map((el) =>
             el.kind === 'text' && isScanText(el) ? (
               <ScanTextNode
@@ -451,6 +541,34 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
           )}
           </Group>
 
+          {elements.map((el) =>
+            el.kind === 'annot' ? (
+              <AnnotNode
+                key={el.id}
+                el={el}
+                selected={el.id === selectedId}
+                draggable={(tool === 'select' || tool === 'annotate') && (!coarse || el.id === selectedId)}
+                {...handlersFor(el)}
+              />
+            ) : null,
+          )}
+          {annotDraft && (
+            <Group listening={false}>
+              <AnnotShape
+                el={{
+                  type: annotDraft.type,
+                  color: useUi.getState().annotColors[annotDraft.type],
+                  width: annotDraft.rect?.width ?? 0,
+                  height: annotDraft.rect?.height ?? 0,
+                  quads: annotDraft.quads,
+                  points: annotDraft.points,
+                  strokeWidth: 2,
+                }}
+              />
+            </Group>
+          )}
+          {annotDraft?.rect && <Rect x={annotDraft.rect.x} y={annotDraft.rect.y} width={annotDraft.rect.width} height={annotDraft.rect.height} stroke={useUi.getState().annotColors.rect} strokeWidth={2} listening={false} />}
+
           {/* Redaction marks sit above everything they will remove. */}
           {elements.map((el) =>
             el.kind === 'redact' ? (
@@ -481,12 +599,13 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
 
         <Transformer
           ref={trRef}
-          rotateEnabled={!(selectedEl?.kind === 'text' && selectedEl.source) && selectedEl?.kind !== 'redact'}
+          rotateEnabled={!(selectedEl?.kind === 'text' && selectedEl.source) && selectedEl?.kind !== 'redact' && selectedEl?.kind !== 'annot'}
           flipEnabled={false}
-          keepRatio={selectedEl?.kind !== 'redact'}
+          keepRatio={selectedEl?.kind !== 'redact' && selectedEl?.kind !== 'annot'}
           enabledAnchors={
             // Edited original text moves but never changes size by accident: size is in the panel.
-            selectedEl?.kind === 'text' && selectedEl.source
+            // Annotations move; only rectangles resize.
+            (selectedEl?.kind === 'text' && selectedEl.source) || (selectedEl?.kind === 'annot' && selectedEl.type !== 'rect')
               ? []
               : selectedEl?.kind === 'text' || (selectedEl?.kind === 'redact' && coarse)
               ? ['top-left', 'top-right', 'bottom-left', 'bottom-right']

@@ -140,7 +140,8 @@ await test('what can’t be removed blocks the download (inline image)', DESKTOP
 
 await test('phone: tap a word to mark it, Find opens the panel', PHONE, async (page) => {
   await open(page, 'redaction.pdf')
-  await page.click('[data-tool=redact]')
+  await page.click('[data-tool=more]')
+  await page.click('[role=menuitem][data-tool=redact]')
   // "John" on the Name line: baseline at y 102, "Name: " is 38.7 pt wide in Helvetica 12.
   const q = await pagePoint(page, 0, 120, 98)
   await page.touchscreen.tap(q.x, q.y)

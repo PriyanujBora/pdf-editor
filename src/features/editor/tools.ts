@@ -1,4 +1,4 @@
-import { EyeOff, ImagePlus, MousePointer2, PenLine, TextCursorInput, Type, type LucideIcon } from 'lucide-react'
+import { EyeOff, Highlighter, ImagePlus, MousePointer2, PenLine, TextCursorInput, Type, type LucideIcon } from 'lucide-react'
 import type { Tool } from '@/store/ui'
 
 export interface ToolDef {
@@ -8,6 +8,8 @@ export interface ToolDef {
   icon: LucideIcon
   key: string
   hint: string
+  /** Shown in the phone toolbar itself (the rest are under More). */
+  primary?: boolean
 }
 
 export const TOOLS: ToolDef[] = [
@@ -18,8 +20,9 @@ export const TOOLS: ToolDef[] = [
     icon: MousePointer2,
     key: 'V',
     hint: 'Select, move and resize. Tap existing text to edit it',
+    primary: true,
   },
-  { id: 'text', label: 'Add text', short: 'Text', icon: Type, key: 'T', hint: 'Tap the page to add text' },
+  { id: 'text', label: 'Add text', short: 'Text', icon: Type, key: 'T', hint: 'Tap the page to add text', primary: true },
   {
     id: 'edit-text',
     label: 'Edit text',
@@ -28,8 +31,17 @@ export const TOOLS: ToolDef[] = [
     key: 'E',
     hint: 'Show all editable text on the page',
   },
+  {
+    id: 'annotate',
+    label: 'Annotate',
+    short: 'Markup',
+    icon: Highlighter,
+    key: 'A',
+    hint: 'Highlight, underline or strike text; add notes, drawings, rectangles and arrows',
+    primary: true,
+  },
   { id: 'image', label: 'Add image', short: 'Image', icon: ImagePlus, key: 'I', hint: 'Insert a PNG or JPG' },
-  { id: 'sign', label: 'Sign', short: 'Sign', icon: PenLine, key: 'S', hint: 'Draw, type or upload your signature, then tap where it goes' },
+  { id: 'sign', label: 'Sign', short: 'Sign', icon: PenLine, key: 'S', hint: 'Draw, type or upload your signature, then tap where it goes', primary: true },
   {
     id: 'redact',
     label: 'Redact',

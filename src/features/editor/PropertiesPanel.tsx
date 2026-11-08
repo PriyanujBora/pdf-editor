@@ -33,6 +33,7 @@ import { deleteSelected, editParagraphLine, shrinkToFit } from './actions'
 import { TOOLS } from './tools'
 import { RedactPanel } from './RedactPanel'
 import { FormPanel } from './FormPanel'
+import { AnnotPanel } from './AnnotPanel'
 
 const SWATCHES = ['#111111', '#ffffff', '#dc2626', '#ea580c', '#16a34a', '#2563eb', '#7c3aed']
 
@@ -375,6 +376,7 @@ export function PropertiesPanel({ className }: { className?: string }) {
   const locked = el?.kind === 'text' && (!!el.scan || !!el.source)
 
   if (el?.kind === 'redact') return <RedactPanel mark={el} />
+  if (el?.kind === 'annot') return <AnnotPanel el={el} />
   if (!el && tool === 'redact') return <RedactPanel />
   if (!el) {
     const t = TOOLS.find((x) => x.id === tool)

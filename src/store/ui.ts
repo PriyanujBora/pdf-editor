@@ -1,6 +1,8 @@
 import { create } from 'zustand'
 
-export type Tool = 'select' | 'text' | 'edit-text' | 'redact' | 'sign'
+export type Tool = 'select' | 'text' | 'edit-text' | 'redact' | 'sign' | 'annotate'
+
+export type AnnotTool = 'highlight' | 'underline' | 'strike' | 'note' | 'ink' | 'rect' | 'arrow'
 
 interface UiState {
   tool: Tool
@@ -19,6 +21,9 @@ interface UiState {
   theme: 'light' | 'dark'
   /** Signature dialog open; the signature waiting to be placed with a tap (Sign tool). */
   signOpen: boolean
+  /** Annotate tool: which kind, and its colour per kind. */
+  annotTool: AnnotTool
+  annotColors: Record<AnnotTool, string>
   pendingSign: { assetId: string; width: number; height: number; date: boolean } | null
 
   setTool: (t: Tool) => void
@@ -54,6 +59,8 @@ export const useUi = create<UiState>()((set) => ({
   propsOpen: false,
   theme: initialTheme(),
   signOpen: false,
+  annotTool: 'highlight',
+  annotColors: { highlight: '#ffd400', underline: '#e5484d', strike: '#e5484d', note: '#ffb224', ink: '#1d3fbf', rect: '#e5484d', arrow: '#e5484d' },
   pendingSign: null,
 
   setTool: (tool) => set((s) => ({ tool, editingId: null, pendingSign: tool === 'sign' ? s.pendingSign : null })),

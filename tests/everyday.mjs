@@ -122,6 +122,59 @@ print(len(imgs), 'date' if any(m in txt for m in ['Jan','Feb','Mar','Apr','May',
   assert.match(out, /^3 date$/, out)
 })
 
+await test('annotations: markup from text, note, ink, rectangle, arrow → real PDF annotations', async (page) => {
+  await open(page, 'text-heavy.pdf')
+  await page.click('[data-tool=annotate]')
+  await page.waitForSelector('[data-testid=annotate-bar]')
+  const drag = async (x0, y0, x1, y1, steps = 8) => {
+    const a = await pagePoint(page, 0, x0, y0)
+    const b = await pagePoint(page, 0, x1, y1)
+    await page.mouse.move(a.x, a.y)
+    await page.mouse.down()
+    for (let i = 1; i <= steps; i++) await page.mouse.move(a.x + ((b.x - a.x) * i) / steps, a.y + ((b.y - a.y) * i) / steps + (i % 2) * 3)
+    await page.mouse.up()
+    await page.waitForTimeout(150)
+  }
+  // Highlight across the start of the first Lorem line (baseline ≈ 168).
+  await drag(52, 165, 200, 165)
+  // Underline: tap a word.
+  await page.click('[data-annot=underline]')
+  let p = await pagePoint(page, 0, 120, 182)
+  await page.mouse.click(p.x, p.y)
+  // Note.
+  await page.click('[data-annot=note]')
+  p = await pagePoint(page, 0, 500, 100)
+  await page.mouse.click(p.x, p.y)
+  await page.fill('[data-testid=annot-note]', 'Check this figure')
+  await page.click('[data-annot=ink]')
+  await drag(380, 380, 470, 420, 14)
+  await page.click('[data-annot=rect]')
+  await drag(60, 380, 160, 440)
+  await page.click('[data-annot=arrow]')
+  await drag(200, 440, 300, 390)
+  const kinds = (await elements(page)).filter((e) => e.kind === 'annot').map((e) => e.type).sort()
+  assert.deepEqual(kinds, ['arrow', 'highlight', 'ink', 'note', 'rect', 'underline'])
+  const hl = (await elements(page)).find((e) => e.type === 'highlight')
+  assert.ok(hl.text && hl.text.startsWith('Lorem'), 'highlight knows its text: ' + hl.text)
+  await page.screenshot({ path: `${OUT}/annotations.png` })
+  const path = await download(page, 'annotated.pdf')
+  const out = py(
+    `import sys, pikepdf, pypdfium2 as pdfium
+pdf = pikepdf.open(sys.argv[1])
+ann = [a for a in pdf.pages[0].get('/Annots', []) if str(a.get('/Subtype')) in ('/Highlight','/Underline','/Text','/Ink','/Square','/Line')]
+kinds = sorted(str(a.Subtype)[1:] for a in ann)
+ok_ap = all('/AP' in a and '/N' in a.AP for a in ann)
+hl = [a for a in ann if a.Subtype == '/Highlight'][0]
+note = [a for a in ann if a.Subtype == '/Text'][0]
+img = pdfium.PdfDocument(sys.argv[1])[0].render(scale=1).to_pil().convert('RGB')
+# A pixel inside the highlight, in page space (x 70, y 169): yellowish (blue channel low).
+r, g, b = img.getpixel((70, 169))
+print(','.join(kinds), ok_ap, len(list(hl.QuadPoints)) % 8 == 0, str(note.Contents), r - b > 60)`,
+    path,
+  )
+  assert.equal(out, 'Highlight,Ink,Line,Square,Text,Underline True True Check this figure True', out)
+})
+
 await browser.close()
 console.log(failures ? `\n${failures} failed` : '\nall passed')
 process.exit(failures ? 1 : 0)
