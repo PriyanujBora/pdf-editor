@@ -305,6 +305,17 @@ export interface AnnotElement extends BaseElement {
   text?: string
 }
 
+/** A new form field the user adds (or accepts from detection) on a flat form (Phase 6). Rotation 0. */
+export interface FieldElement extends BaseElement {
+  kind: 'field'
+  fieldType: 'text' | 'checkbox'
+  /** Field name (unique in the file; the export adds " (2)" on a clash). */
+  name: string
+  width: number
+  height: number
+  multiline?: boolean
+}
+
 /** Document clean-up applied on download (Redact panel). */
 export interface SanitizeOptions {
   metadata: boolean
@@ -317,7 +328,7 @@ export interface SanitizeOptions {
 
 export type { OriginalFont }
 
-export type EditorElement = TextElement | ImageElement | RedactElement | AnnotElement
+export type EditorElement = TextElement | ImageElement | RedactElement | AnnotElement | FieldElement
 
 export interface ImageAsset {
   id: string

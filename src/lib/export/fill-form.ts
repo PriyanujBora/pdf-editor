@@ -5,6 +5,9 @@
  * Bengali still show). Calculation scripts are kept as they are (not run here). Optional flatten.
  */
 import {
+  degrees,
+  PDFName,
+  type PDFPage,
   PDFCheckBox,
   PDFDropdown,
   PDFOptionList,
@@ -15,13 +18,44 @@ import {
   type PDFFont,
 } from '@cantoo/pdf-lib'
 import { fontRuns } from '@/lib/fonts'
-import type { FieldValue, FontFamilyId } from '@/types'
+import type { FieldElement, FieldValue, FontFamilyId } from '@/types'
+import { apply, type Mat } from './matrix'
 
 const STD: [RegExp, StandardFonts][] = [
   [/^(cour|courier)/i, StandardFonts.Courier],
   [/^(tiro|times|tibo|tiit)/i, StandardFonts.TimesRoman],
   [/^(helv|helvetica|arial)/i, StandardFonts.Helvetica],
 ]
+
+/**
+ * New fields on a flat form (Phase 6): real text fields and check boxes at the boxes the user kept,
+ * transparent (the printed line or box stays the visual), upright on rotated pages, unique names.
+ */
+export async function createFields(doc: PDFDocument, items: { page: PDFPage; toPdf: Mat; rotate: number; el: FieldElement }[]) {
+  if (!items.length) return
+  const form = doc.getForm()
+  const helv = await doc.embedFont(StandardFonts.Helvetica)
+  const taken = new Set(form.getFields().map((f) => f.getName()))
+  for (const { page, toPdf, rotate, el } of items) {
+    const ps = [apply(toPdf, el.x, el.y), apply(toPdf, el.x + el.width, el.y + el.height)]
+    const box = { x: Math.min(ps[0].x, ps[1].x), y: Math.min(ps[0].y, ps[1].y), width: Math.abs(ps[1].x - ps[0].x), height: Math.abs(ps[1].y - ps[0].y) }
+    let name = el.name.trim().replace(/\./g, ' ') || 'Field'
+    const base = name
+    for (let n = 2; taken.has(name); n++) name = `${base} (${n})`
+    taken.add(name)
+    const field = el.fieldType === 'checkbox' ? form.createCheckBox(name) : form.createTextField(name)
+    if (field instanceof PDFTextField && el.multiline) field.enableMultiline()
+    field.addToPage(page, { ...box, borderWidth: 0, rotate: degrees(rotate) })
+    // No white background or border: the printed form stays visible.
+    for (const w of field.acroField.getWidgets()) {
+      const mk = w.getAppearanceCharacteristics()
+      mk?.dict.delete(PDFName.of('BG'))
+      mk?.dict.delete(PDFName.of('BC'))
+    }
+    if (field instanceof PDFTextField) field.updateAppearances(helv)
+    else field.updateAppearances()
+  }
+}
 
 export async function fillForm(
   doc: PDFDocument,

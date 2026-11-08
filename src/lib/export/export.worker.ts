@@ -38,7 +38,7 @@ import type { Cover, FontFamilyId, ImageElement, RedactElement, TextElement } fr
 import { collectGarbage, privateResources, pruneDeletedPages, rebuildPageTree, removeAnnotations } from './doc-structure'
 import { annotationsUnder, redactPage, type Box, type ImageSwap } from '@/lib/content/redact'
 import { sanitize } from './sanitize'
-import { fillForm } from './fill-form'
+import { createFields, fillForm } from './fill-form'
 import { addAnnotation } from './annotations'
 import { assemblePages } from './assemble'
 import { findLeaks, scrubStrings } from './verify-scan'
@@ -209,7 +209,16 @@ async function buildPdf(req: ExportRequest, notes: RemovalNote[], out: { redacti
     progress(0.15 + (0.6 * (i + 1)) / req.pages.length)
   }
 
-  // Form values (Phase 6): before redaction, so fields under a mark still leave with their values.
+  // New fields on flat forms, then form values (Phase 6) — before redaction, so fields under a mark
+  // still leave with their values.
+  await createFields(
+    doc,
+    req.pages.flatMap((item, i) => {
+      const info = req.infos[i]
+      const toPdf = invert(pdfToPage(info.view, info.rotate))
+      return req.elements.flatMap((el) => (el.kind === 'field' && el.pageId === item.id ? [{ page: pageOf[i], toPdf, rotate: (info.rotate + item.rotation) % 360, el }] : []))
+    }),
+  )
   const filled = await fillForm(doc, req.formValues ?? {}, !!req.flattenForm, (family) => fonts.get(family, false, false))
   out.formNotes = filled.notes
 

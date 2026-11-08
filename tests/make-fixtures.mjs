@@ -604,6 +604,29 @@ function textOps(page, lines) {
   await browser.close()
 }
 
+// A flat (non-fillable) form: write-on lines with labels, an answer box, a tick box, underscores —
+// and two things that are not fields: an underlined heading and a page-wide rule.
+{
+  const doc = await PDFDocument.create()
+  const helv = await doc.embedFont(StandardFonts.Helvetica)
+  const p = doc.addPage([595, 842])
+  const t = (s, x, y, size = 11) => p.drawText(s, { x, y, size, font: helv })
+  t('Application form', 72, 770, 18)
+  p.drawLine({ start: { x: 30, y: 750 }, end: { x: 565, y: 750 }, thickness: 1 })
+  t('Terms and conditions', 72, 725)
+  p.drawLine({ start: { x: 72, y: 723 }, end: { x: 72 + helv.widthOfTextAtSize('Terms and conditions', 11), y: 723 }, thickness: 0.6 })
+  t('Full name:', 72, 690)
+  p.drawLine({ start: { x: 140, y: 688 }, end: { x: 420, y: 688 }, thickness: 0.75 })
+  t('Email:', 72, 660)
+  p.drawLine({ start: { x: 140, y: 658 }, end: { x: 420, y: 658 }, thickness: 0.75 })
+  t('Address:', 72, 630)
+  p.drawRectangle({ x: 72, y: 560, width: 400, height: 60, borderWidth: 0.75, borderColor: rgb(0, 0, 0) })
+  p.drawRectangle({ x: 72, y: 528, width: 11, height: 11, borderWidth: 0.75, borderColor: rgb(0, 0, 0) })
+  t('I agree to the terms', 90, 530)
+  t('Signature: ______________________', 72, 490)
+  await writeFile(`${OUT}/flat-form.pdf`, await doc.save())
+}
+
 // A "photo" of a signature on off-white paper with a little noise (upload + background removal).
 {
   const browser = await chromium.launch()

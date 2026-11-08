@@ -20,6 +20,7 @@ import { RedactNode } from './elements/RedactNode'
 import { addAreaMark, markWordAt, MIN_MARK } from './redact-actions'
 import { placeSignature } from './sign-actions'
 import { AnnotNode, AnnotShape } from './elements/AnnotNode'
+import { FieldNode } from './elements/FieldNode'
 import { createAnnot } from './annot-actions'
 import { selectText } from '@/lib/annotations'
 import { searchLines, wordAt, type SearchLine } from '@/lib/redact/find'
@@ -552,6 +553,11 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
               />
             ) : null,
           )}
+          {elements.map((el) =>
+            el.kind === 'field' ? (
+              <FieldNode key={el.id} el={el} selected={el.id === selectedId} draggable={tool === 'select' && (!coarse || el.id === selectedId)} {...handlersFor(el)} />
+            ) : null,
+          )}
           {annotDraft && (
             <Group listening={false}>
               <AnnotShape
@@ -599,9 +605,9 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
 
         <Transformer
           ref={trRef}
-          rotateEnabled={!(selectedEl?.kind === 'text' && selectedEl.source) && selectedEl?.kind !== 'redact' && selectedEl?.kind !== 'annot'}
+          rotateEnabled={!(selectedEl?.kind === 'text' && selectedEl.source) && selectedEl?.kind !== 'redact' && selectedEl?.kind !== 'annot' && selectedEl?.kind !== 'field'}
           flipEnabled={false}
-          keepRatio={selectedEl?.kind !== 'redact' && selectedEl?.kind !== 'annot'}
+          keepRatio={selectedEl?.kind !== 'redact' && selectedEl?.kind !== 'annot' && !(selectedEl?.kind === 'field' && selectedEl.fieldType === 'text')}
           enabledAnchors={
             // Edited original text moves but never changes size by accident: size is in the panel.
             // Annotations move; only rectangles resize.

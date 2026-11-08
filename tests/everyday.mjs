@@ -251,6 +251,33 @@ print(n, ''.join(m[0] for m in marks), [m for m in marks if len(m) > 1], outline
   assert.equal(await page.evaluate(() => Object.keys(window.__session.getState().docs).length), 2)
 })
 
+await test('flat form → fillable: detect, adjust, real fields', async (page) => {
+  await open(page, 'flat-form.pdf')
+  await page.click('[data-testid=detect-fields]')
+  await page.waitForFunction(() => Object.values(window.__doc.getState().elements).filter((e) => e.kind === 'field').length > 0, null, { timeout: 15000 })
+  const fields = (await elements(page)).filter((e) => e.kind === 'field')
+  const names = fields.map((f) => `${f.fieldType}:${f.name}${f.multiline ? '+' : ''}`).sort()
+  assert.deepEqual(names, ['checkbox:I agree to the terms', 'text:Address+', 'text:Email', 'text:Full name', 'text:Signature'], names.join(' | '))
+  await page.screenshot({ path: `${OUT}/fields-detected.png` })
+  // Rename one in the panel.
+  const email = fields.find((f) => f.name === 'Email')
+  await page.evaluate((id) => window.__ui.getState().set({ selectedId: id }), email.id)
+  await page.fill('[data-testid=field-name]', 'E-mail address')
+  const path = await download(page, 'fillable.pdf')
+  const out = py(
+    `import sys, pypdf
+r = pypdf.PdfReader(sys.argv[1])
+f = r.get_fields() or {}
+print(sorted((k, str(v.get('/FT'))) for k, v in f.items()))`,
+    path,
+  )
+  assert.equal(out, "[('Address', '/Tx'), ('E-mail address', '/Tx'), ('Full name', '/Tx'), ('I agree to the terms', '/Btn'), ('Signature', '/Tx')]", out)
+  // The new file opens as a form: fill it in.
+  await page.click('[aria-label="Close file"]')
+  await page.setInputFiles('input[type=file]', path)
+  await page.waitForSelector('[data-field="Full name"]', { timeout: 20000 })
+})
+
 await browser.close()
 console.log(failures ? `\n${failures} failed` : '\nall passed')
 process.exit(failures ? 1 : 0)
