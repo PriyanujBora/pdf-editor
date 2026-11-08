@@ -6,6 +6,7 @@ import { useIsDesktop } from '@/hooks/use-media-query'
 import { useDoc } from '@/store/document'
 import { useUi } from '@/store/ui'
 import { ChoiceDialog } from './ChoiceDialog'
+import { SignatureDialog } from './SignatureDialog'
 import { MobileToolbar } from './MobileToolbar'
 import { PropertiesPanel } from './PropertiesPanel'
 import { Thumbnails } from './Thumbnails'
@@ -49,6 +50,7 @@ export default function Editor() {
             </aside>
           </div>
           <ChoiceDialog />
+          <SignatureDialog />
         </div>
       </TooltipProvider>
     )
@@ -62,6 +64,7 @@ export default function Editor() {
       </main>
       <MobileToolbar />
       <ChoiceDialog />
+      <SignatureDialog />
 
       <Sheet open={thumbsOpen} onOpenChange={(o) => useUi.getState().set({ thumbsOpen: o })}>
         <SheetContent side="left" className="flex w-[min(85vw,280px)] flex-col gap-0 p-0">

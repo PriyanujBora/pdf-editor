@@ -8,3 +8,12 @@ Arimo (Arial/Helvetica metrics), Carlito (Calibri metrics), Cousine (Courier met
 (Georgia metrics) are licensed under the SIL Open Font License, Version 1.1. They come from
 github.com/google/fonts (ofl/…) and were instanced, unhinted and subset to Latin by
 scripts/build-fallback-fonts.py; advance widths are unchanged.
+
+Signature fonts (typed signatures only; rendered to an image, never embedded in PDFs):
+- SignatureScript-Regular.ttf is a modified version of Dancing Script
+  (Copyright 2016 The Dancing Script Project Authors, https://github.com/googlefonts/DancingScript,
+  with Reserved Font Name 'Dancing Script'): instanced at weight 500 and subset to Latin, so it is
+  renamed "Signature Script" as the licence requires.
+- GreatVibes-Regular.ttf: Great Vibes (Copyright 2015 The Great Vibes Pro Project Authors,
+  https://github.com/googlefonts/great-vibes), subset to Latin.
+Both are licensed under the SIL Open Font License, Version 1.1 (https://openfontlicense.org).

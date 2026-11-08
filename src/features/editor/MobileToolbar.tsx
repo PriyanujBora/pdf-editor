@@ -3,6 +3,7 @@ import { cn } from '@/lib/utils'
 import { useUi } from '@/store/ui'
 import { pickImage } from './actions'
 import { TOOLS } from './tools'
+import { openSignature } from './sign-actions'
 
 function BarButton({
   active,
@@ -54,7 +55,7 @@ export function MobileToolbar() {
           label={t.short}
           icon={t.icon}
           active={t.id === tool}
-          onClick={() => (t.id === 'image' ? pickImage() : useUi.getState().setTool(t.id))}
+          onClick={() => (t.id === 'image' ? pickImage() : t.id === 'sign' ? openSignature() : useUi.getState().setTool(t.id))}
         />
       ))}
       <div className="my-2 w-px bg-border" />

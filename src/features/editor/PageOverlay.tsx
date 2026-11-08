@@ -17,6 +17,7 @@ import { ScanTextNode } from './elements/ScanTextNode'
 import { SourceTextNode } from './elements/SourceTextNode'
 import { RedactNode } from './elements/RedactNode'
 import { addAreaMark, markWordAt, MIN_MARK } from './redact-actions'
+import { placeSignature } from './sign-actions'
 import { activeInput } from './active-input'
 import { isScanText } from '@/lib/scan/compose'
 import { caretAt, type LineLayout } from '@/lib/text/line-layout'
@@ -165,6 +166,11 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
     if (e.target !== e.target.getStage()) return
     const ui = useUi.getState()
     if (ui.tool === 'redact') return // marks are made on press/release (onRedactPress)
+    if (ui.tool === 'sign') {
+      const pos = groupRef.current?.getRelativePointerPosition()
+      if (pos && ui.pendingSign) placeSignature(page, pos.x, pos.y)
+      return
+    }
     if (ui.tool === 'text') {
       const pos = groupRef.current?.getRelativePointerPosition()
       if (!pos) return
@@ -349,7 +355,7 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
       onTap={onStageTap}
       onPointerDown={onRedactPress}
       style={{
-        cursor: tool === 'text' ? 'text' : tool === 'redact' ? 'crosshair' : 'default',
+        cursor: tool === 'text' ? 'text' : tool === 'redact' || tool === 'sign' ? 'crosshair' : 'default',
         // One finger draws marks with the Redact tool (two fingers still zoom).
         touchAction: tool === 'redact' ? 'none' : undefined,
       }}

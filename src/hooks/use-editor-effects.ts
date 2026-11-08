@@ -79,6 +79,7 @@ export function useShortcuts() {
         else if (key === 't') ui.setTool('text')
         else if (key === 'e') ui.setTool('edit-text')
         else if (key === 'r') ui.setTool('redact')
+        else if (key === 's') ui.set({ signOpen: true })
         else if (ui.selectedId && e.key.startsWith('Arrow')) {
           e.preventDefault()
           const el = useDoc.getState().elements[ui.selectedId]

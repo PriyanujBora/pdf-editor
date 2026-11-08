@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-export type Tool = 'select' | 'text' | 'edit-text' | 'redact'
+export type Tool = 'select' | 'text' | 'edit-text' | 'redact' | 'sign'
 
 interface UiState {
   tool: Tool
@@ -17,6 +17,9 @@ interface UiState {
   thumbsOpen: boolean
   propsOpen: boolean
   theme: 'light' | 'dark'
+  /** Signature dialog open; the signature waiting to be placed with a tap (Sign tool). */
+  signOpen: boolean
+  pendingSign: { assetId: string; width: number; height: number; date: boolean } | null
 
   setTool: (t: Tool) => void
   setZoom: (z: number) => void
@@ -50,8 +53,10 @@ export const useUi = create<UiState>()((set) => ({
   thumbsOpen: false,
   propsOpen: false,
   theme: initialTheme(),
+  signOpen: false,
+  pendingSign: null,
 
-  setTool: (tool) => set({ tool, editingId: null }),
+  setTool: (tool) => set((s) => ({ tool, editingId: null, pendingSign: tool === 'sign' ? s.pendingSign : null })),
   setZoom: (z) => set({ zoom: clampZoom(z) }),
   select: (selectedId) => set((s) => ({ selectedId, editingId: s.editingId === selectedId ? s.editingId : null })),
   startEditing: (editingId) => set(editingId ? { editingId, selectedId: editingId } : { editingId }),

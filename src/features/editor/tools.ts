@@ -1,4 +1,4 @@
-import { EyeOff, ImagePlus, MousePointer2, TextCursorInput, Type, type LucideIcon } from 'lucide-react'
+import { EyeOff, ImagePlus, MousePointer2, PenLine, TextCursorInput, Type, type LucideIcon } from 'lucide-react'
 import type { Tool } from '@/store/ui'
 
 export interface ToolDef {
@@ -29,6 +29,7 @@ export const TOOLS: ToolDef[] = [
     hint: 'Show all editable text on the page',
   },
   { id: 'image', label: 'Add image', short: 'Image', icon: ImagePlus, key: 'I', hint: 'Insert a PNG or JPG' },
+  { id: 'sign', label: 'Sign', short: 'Sign', icon: PenLine, key: 'S', hint: 'Draw, type or upload your signature, then tap where it goes' },
   {
     id: 'redact',
     label: 'Redact',

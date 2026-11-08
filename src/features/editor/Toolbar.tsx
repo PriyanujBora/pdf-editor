@@ -10,6 +10,7 @@ import { useSession } from '@/store/session'
 import { useUi } from '@/store/ui'
 import { downloadPdf, pickImage } from './actions'
 import { TOOLS } from './tools'
+import { openSignature } from './sign-actions'
 import { viewerBridge } from './viewer-bridge'
 import { useHistoryState } from '@/hooks/use-history-state'
 
@@ -70,7 +71,7 @@ export function Toolbar() {
                   'h-9 gap-2 rounded-lg px-3 text-muted-foreground hover:bg-background hover:text-foreground',
                   active && 'bg-background text-foreground shadow-sm ring-1 ring-border [&_svg]:text-brand',
                 )}
-                onClick={() => (t.id === 'image' ? pickImage() : useUi.getState().setTool(t.id))}
+                onClick={() => (t.id === 'image' ? pickImage() : t.id === 'sign' ? openSignature() : useUi.getState().setTool(t.id))}
               >
                 <t.icon />
                 <span className="hidden xl:inline">{t.label}</span>

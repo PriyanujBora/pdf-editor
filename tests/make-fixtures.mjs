@@ -604,4 +604,16 @@ function textOps(page, lines) {
   await browser.close()
 }
 
+// A "photo" of a signature on off-white paper with a little noise (upload + background removal).
+{
+  const browser = await chromium.launch()
+  const page = await browser.newPage({ viewport: { width: 600, height: 240 } })
+  await page.setContent(`<body style="margin:0;background:#ece6d8">
+    <svg width="600" height="240"><filter id="n"><feTurbulence baseFrequency="0.9" numOctaves="1" seed="3"/><feColorMatrix values="0 0 0 0 0.85 0 0 0 0 0.82 0 0 0 0 0.74 0 0 0 0.25 0"/></filter>
+    <rect width="600" height="240" filter="url(#n)"/>
+    <path d="M60 160 C 120 40, 160 220, 220 110 S 320 60, 360 150 S 470 90, 540 120" stroke="#1b2a6b" stroke-width="7" fill="none" stroke-linecap="round"/></svg></body>`)
+  await writeFile(`${OUT}/signature-photo.png`, await page.screenshot({ type: 'png' }))
+  await browser.close()
+}
+
 console.log('fixtures written to', OUT)
