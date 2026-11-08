@@ -27,6 +27,7 @@ dist-ssr
 public/pdfjs
 test-results
 tests/fixtures/*.pdf
+tests/fixtures/*.png
 tests/out
 .wrangler
 dev-dist
