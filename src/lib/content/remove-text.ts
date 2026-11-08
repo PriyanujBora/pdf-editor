@@ -24,6 +24,7 @@ import {
   PDFName,
   PDFNumber,
   PDFRawStream,
+  PDFRef,
   PDFStream,
   decodePDFRawStream,
   type PDFContext,
@@ -322,6 +323,8 @@ export interface DrawnImage {
   width: number
   height: number
   kind: 'xobject' | 'inline' | 'mask'
+  /** The image XObject's reference (compression replaces the object in place). */
+  ref?: PDFRef
   nested: boolean
 }
 
@@ -604,7 +607,8 @@ export function interpret(
         if (xo instanceof PDFStream && xo.dict.get(N('Subtype')) === N('Image')) {
           const dn = (k: string) => (xo.dict.lookup(N(k)) as PDFNumber | undefined)?.asNumber?.() ?? 0
           const mask = String(xo.dict.lookup(N('ImageMask')) ?? '') === 'true'
-          collect?.images.push({ stream, op: oi, name: a[0].v, ctm: g.ctm, width: dn('Width'), height: dn('Height'), kind: mask ? 'mask' : 'xobject', nested })
+          const ref = resources?.lookupMaybe(N('XObject'), PDFDict)?.get(N(a[0].v))
+          collect?.images.push({ stream, op: oi, name: a[0].v, ctm: g.ctm, width: dn('Width'), height: dn('Height'), kind: mask ? 'mask' : 'xobject', nested, ...(ref instanceof PDFRef ? { ref } : {}) })
           break
         }
         if (!(xo instanceof PDFStream) || xo.dict.get(N('Subtype')) !== N('Form')) break

@@ -1,4 +1,4 @@
-import { Ellipsis, Files, Search, SlidersHorizontal } from 'lucide-react'
+import { Ellipsis, Files, Minimize2, Search, SlidersHorizontal } from 'lucide-react'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
 import { useUi } from '@/store/ui'
@@ -76,6 +76,9 @@ export function MobileToolbar() {
               <t.icon className="size-4" /> {t.label}
             </DropdownMenuItem>
           ))}
+          <DropdownMenuItem data-tool="compress" className="min-h-11 gap-3" onSelect={() => useUi.getState().set({ compressOpen: true })}>
+            <Minimize2 className="size-4" /> Compress
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
       <div className="my-2 w-px bg-border" />

@@ -430,6 +430,8 @@ export function deleteSelected() {
   useUi.getState().set({ selectedId: null, editingId: null, propsOpen: false })
 }
 
+export const mb = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1e3))} KB`)
+
 let exporting = false
 export async function downloadPdf() {
   if (exporting) return
@@ -474,7 +476,10 @@ export async function downloadPdf() {
   }
   const id = toast.loading('Preparing your PDF…')
   try {
-    const { bytes, notes, redaction, formNotes } = await exportPdf((v) => toast.loading(`Preparing your PDF… ${Math.round(v * 100)}%`, { id }), { keepEncryption })
+    const { bytes, notes, redaction, formNotes, compress } = await exportPdf((v) => toast.loading(`Preparing your PDF… ${Math.round(v * 100)}%`, { id }), {
+      keepEncryption,
+      compress: useSession.getState().compress,
+    })
     useSession.getState().set({ notRemoved: Object.fromEntries(notes.map((n) => [n.elementId, n.reason])) })
     if (redaction && (redaction.problems.length || redaction.leaks.length)) {
       toast.error('Nothing was downloaded', { id, duration: 5000 })
@@ -521,6 +526,14 @@ export async function downloadPdf() {
         id,
         duration: 12000,
         description: `It’s covered on the page but still in the file (${notes[0].reason}). Don’t rely on these edits to hide information.`,
+      })
+    else if (compress)
+      toast.success('Downloaded', {
+        id,
+        duration: 5000,
+        description: compress.images
+          ? `${compress.images} ${compress.images === 1 ? 'image' : 'images'} resampled: ${mb(compress.before)} → ${mb(compress.after)}. File: ${mb(bytes.length)}.`
+          : 'No image needed resampling at this setting.',
       })
     else toast.success('Downloaded', { id, duration: 2500 })
   } catch (err) {

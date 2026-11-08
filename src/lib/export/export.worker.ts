@@ -41,6 +41,7 @@ import { sanitize } from './sanitize'
 import { createFields, fillForm } from './fill-form'
 import { addAnnotation } from './annotations'
 import { assemblePages } from './assemble'
+import { compressImages, type CompressReport } from './compress'
 import { findLeaks, scrubStrings } from './verify-scan'
 import { compatFontkit } from './fontkit-compat'
 import { applySourceEncryption, readEncryption } from './keep-encryption'
@@ -53,9 +54,9 @@ declare const self: DedicatedWorkerGlobalScope
 self.onmessage = async (e: MessageEvent<ExportRequest>) => {
   try {
     const notes: RemovalNote[] = []
-    const out: { redaction?: RedactionReport; formNotes?: string[] } = {}
+    const out: { redaction?: RedactionReport; formNotes?: string[]; compress?: CompressReport } = {}
     const bytes = await buildPdf(e.data, notes, out)
-    self.postMessage({ type: 'done', bytes, notes, redaction: out.redaction, formNotes: out.formNotes } satisfies ExportResponse, [bytes.buffer])
+    self.postMessage({ type: 'done', bytes, notes, redaction: out.redaction, formNotes: out.formNotes, compress: out.compress } satisfies ExportResponse, [bytes.buffer])
   } catch (err) {
     self.postMessage({ type: 'error', message: err instanceof Error ? err.message : String(err) } satisfies ExportResponse)
   }
@@ -63,7 +64,7 @@ self.onmessage = async (e: MessageEvent<ExportRequest>) => {
 
 const progress = (value: number) => self.postMessage({ type: 'progress', value } satisfies ExportResponse)
 
-async function buildPdf(req: ExportRequest, notes: RemovalNote[], out: { redaction?: RedactionReport; formNotes?: string[] }): Promise<Uint8Array> {
+async function buildPdf(req: ExportRequest, notes: RemovalNote[], out: { redaction?: RedactionReport; formNotes?: string[]; compress?: CompressReport }): Promise<Uint8Array> {
   // Edit the source document itself (not copies of its pages in a new one) so forms, outlines,
   // named destinations, page labels, tags, metadata and attachments survive.
   const enc = req.keepEncryption ? await readEncryption(req.bytes, req.password) : null
@@ -265,6 +266,16 @@ async function buildPdf(req: ExportRequest, notes: RemovalNote[], out: { redacti
     report.sanitized = r.removed
     report.sanitizeNotes = r.notes
     if (req.sanitize.metadata) scanNote()
+  }
+
+  // Compress: resample images drawn above the target resolution (in place).
+  if (req.compress) {
+    await doc.flush()
+    out.compress = await compressImages(doc, kept, (p) => {
+      const info = req.infos[pageOf.indexOf(p)]
+      const m = pdfToPage(info.view, info.rotate)
+      return [m.a, m.b, m.c, m.d, m.e, m.f]
+    }, req.compress)
   }
 
   // Page order, deleted pages and everything that pointed at them; then drop unreachable objects

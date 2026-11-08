@@ -1,4 +1,4 @@
-import { ArrowLeft, Download, Minus, Plus, Redo2, Undo2 } from 'lucide-react'
+import { ArrowLeft, Download, Minimize2, Minus, Plus, Redo2, Undo2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -127,6 +127,11 @@ export function Toolbar() {
         </IconTip>
         <Separator orientation="vertical" className="mx-1 !h-5" />
         <ThemeToggle />
+        <IconTip label="Compress (make images smaller)">
+          <Button variant="ghost" size="icon" className="size-9" onClick={() => useUi.getState().set({ compressOpen: true })} aria-label="Compress" data-testid="compress">
+            <Minimize2 />
+          </Button>
+        </IconTip>
         <Button className="ml-1 h-9 gap-2 rounded-lg px-4" onClick={() => void downloadPdf()} data-testid="download">
           <Download /> Download
         </Button>

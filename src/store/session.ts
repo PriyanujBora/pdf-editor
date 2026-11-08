@@ -39,6 +39,8 @@ interface SessionState {
   sanitize: SanitizeOptions
   /** Form fields in the file, whether some are calculated by scripts, and the flatten choice. */
   form: { fields: number; calculated: boolean; flatten: boolean }
+  /** Compress images on download (null = off). */
+  compress: { dpi: number; quality: number } | null
   pdf: PDFDocumentProxy | null
   sourcePages: SourcePageInfo[]
   /** Inserted PDFs by id (pages refer to them with PageItem.doc). */
@@ -61,6 +63,7 @@ export const useSession = create<SessionState>()((set, get) => ({
   notRemoved: {},
   sanitize: NO_SANITIZE,
   form: { fields: 0, calculated: false, flatten: false },
+  compress: null,
   pdf: null,
   sourcePages: [],
   docs: {},
@@ -71,6 +74,6 @@ export const useSession = create<SessionState>()((set, get) => ({
   close: () => {
     void get().pdf?.loadingTask.destroy()
     for (const d of Object.values(get().docs)) void d.pdf.loadingTask.destroy()
-    set({ status: 'empty', progress: 0, fileName: '', bytes: null, password: '', encrypted: false, bookmarks: {}, notRemoved: {}, sanitize: NO_SANITIZE, form: { fields: 0, calculated: false, flatten: false }, pdf: null, sourcePages: [], docs: {}, assets: {} })
+    set({ status: 'empty', progress: 0, fileName: '', bytes: null, password: '', encrypted: false, bookmarks: {}, notRemoved: {}, sanitize: NO_SANITIZE, form: { fields: 0, calculated: false, flatten: false }, compress: null, pdf: null, sourcePages: [], docs: {}, assets: {} })
   },
 }))

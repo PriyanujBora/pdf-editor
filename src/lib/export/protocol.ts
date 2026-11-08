@@ -21,6 +21,8 @@ export interface ExportRequest {
   /** Filled-in form fields, and whether to flatten the form into the pages. */
   formValues: Record<string, FieldValue>
   flattenForm: boolean
+  /** Resample images above this resolution (Compress). */
+  compress?: { dpi: number; quality: number } | null
   /** Absolute URL of the app root, for fetching fonts from the worker. */
   baseUrl: string
 }
@@ -44,5 +46,5 @@ export interface RedactionReport {
 
 export type ExportResponse =
   | { type: 'progress'; value: number }
-  | { type: 'done'; bytes: Uint8Array; notes: RemovalNote[]; redaction?: RedactionReport; formNotes?: string[] }
+  | { type: 'done'; bytes: Uint8Array; notes: RemovalNote[]; redaction?: RedactionReport; formNotes?: string[]; compress?: { images: number; before: number; after: number } }
   | { type: 'error'; message: string }

@@ -23,6 +23,7 @@ interface UiState {
   signOpen: boolean
   /** Extract / split dialog. */
   extractOpen: boolean
+  compressOpen: boolean
   /** Annotate tool: which kind, and its colour per kind. */
   annotTool: AnnotTool
   annotColors: Record<AnnotTool, string>
@@ -62,6 +63,7 @@ export const useUi = create<UiState>()((set) => ({
   theme: initialTheme(),
   signOpen: false,
   extractOpen: false,
+  compressOpen: false,
   annotTool: 'highlight',
   annotColors: { highlight: '#ffd400', underline: '#e5484d', strike: '#e5484d', note: '#ffb224', ink: '#1d3fbf', rect: '#e5484d', arrow: '#e5484d' },
   pendingSign: null,

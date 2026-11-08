@@ -278,6 +278,30 @@ print(sorted((k, str(v.get('/FT'))) for k, v in f.items()))`,
   await page.waitForSelector('[data-field="Full name"]', { timeout: 20000 })
 })
 
+await test('compress: preview the size, download smaller images, text kept', async (page) => {
+  await open(page, 'scanned-ocr.pdf')
+  await page.click('[data-testid=compress]')
+  await page.click('[data-testid=compress-small]')
+  await page.click('[data-testid=compress-check]')
+  await page.waitForFunction(() => /smaller/.test(document.querySelector('[data-testid=compress-estimate]')?.textContent ?? ''), null, { timeout: 60000 })
+  await page.screenshot({ path: `${OUT}/compress.png` })
+  const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 60000 }), page.click('[data-testid=compress-download]')])
+  const path = `${OUT}/compressed.pdf`
+  await dl.saveAs(path)
+  const out = py(
+    `import sys, os, subprocess, pikepdf
+src, out = sys.argv[1], sys.argv[2]
+pdf = pikepdf.open(out)
+imgs = [o for o in pdf.objects if isinstance(o, pikepdf.Stream) and o.get('/Subtype') == '/Image']
+w = max(int(o.Width) for o in imgs)
+txt = subprocess.run(['pdftotext', out, '-'], capture_output=True).stdout.decode('utf-8', 'replace')
+print(os.path.getsize(out) < 0.7 * os.path.getsize(src), w <= 1060, 'MEMORANDUM' in txt)`,
+    `${FIX}/scanned-ocr.pdf`,
+    path,
+  )
+  assert.equal(out, 'True True True', out)
+})
+
 await browser.close()
 console.log(failures ? `\n${failures} failed` : '\nall passed')
 process.exit(failures ? 1 : 0)

@@ -12,6 +12,8 @@ export interface ExportResult {
   redaction?: RedactionReport
   /** Form fields that couldn't be written (name: reason). */
   formNotes?: string[]
+  /** What Compress did. */
+  compress?: { images: number; before: number; after: number }
 }
 
 /** True when the download would be the original file: no edits, same pages in the same order. */
@@ -33,7 +35,7 @@ export function isUnchanged() {
  */
 export async function exportPdf(
   onProgress?: (v: number) => void,
-  opts: { keepEncryption?: boolean; forceRebuild?: boolean; pages?: PageItem[] } = {},
+  opts: { keepEncryption?: boolean; forceRebuild?: boolean; pages?: PageItem[]; compress?: { dpi: number; quality: number } | null } = {},
 ): Promise<ExportResult> {
   const s = useSession.getState()
   const d0 = useDoc.getState()
@@ -41,7 +43,7 @@ export async function exportPdf(
   const d = opts.pages ? { ...d0, pages: opts.pages } : d0
   if (!s.bytes) throw new Error('No document open')
   const keepEncryption = s.encrypted && opts.keepEncryption !== false
-  if (!opts.pages && isUnchanged() && (keepEncryption || !s.encrypted) && !opts.forceRebuild && !(import.meta.env.DEV && (window as { __forceRebuild?: boolean }).__forceRebuild)) {
+  if (!opts.pages && !opts.compress && isUnchanged() && (keepEncryption || !s.encrypted) && !opts.forceRebuild && !(import.meta.env.DEV && (window as { __forceRebuild?: boolean }).__forceRebuild)) {
     onProgress?.(1)
     return { bytes: s.bytes.slice(), notes: [] }
   }
@@ -78,6 +80,7 @@ export async function exportPdf(
     sanitize: s.sanitize,
     formValues: d.formValues,
     flattenForm: s.form.flatten && s.form.fields > 0,
+    compress: opts.compress ?? null,
     bytes: s.bytes,
     password: s.password,
     keepEncryption,
@@ -98,7 +101,7 @@ export async function exportPdf(
       if (m.type === 'progress') onProgress?.(m.value)
       else {
         worker.terminate()
-        if (m.type === 'done') resolve({ bytes: m.bytes, notes: m.notes, redaction: m.redaction, formNotes: m.formNotes })
+        if (m.type === 'done') resolve({ bytes: m.bytes, notes: m.notes, redaction: m.redaction, formNotes: m.formNotes, compress: m.compress })
         else reject(new Error(m.message))
       }
     }
