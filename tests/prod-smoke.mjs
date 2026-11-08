@@ -106,6 +106,25 @@ await page.waitForSelector('[data-page-id] canvas', { timeout: 15000 })
 console.log('offline open ok')
 await ctx.setOffline(false)
 
+// Trust pages (Phase 7): /about through the SPA fallback (same CSP), offline readiness shown, the
+// landing badge, and "Built on this device" after a download.
+const about = await page.goto(URL + 'about', { waitUntil: 'networkidle' })
+assert.ok(about.headers()['content-security-policy']?.includes("connect-src 'self'"), '/about has the CSP')
+await page.waitForSelector('text=About & privacy')
+await page.waitForSelector('[data-testid=offline-status]:has-text("Ready offline")', { timeout: 15000 })
+await page.goto(URL, { waitUntil: 'networkidle' })
+await page.waitForSelector('[data-testid=offline-badge]:has-text("Works offline")', { timeout: 15000 })
+await page.setInputFiles('input[type=file]', 'tests/fixtures/text-heavy.pdf')
+await page.waitForSelector('[data-page-id] canvas')
+await page.click('[data-tool=text]')
+const tbox = await page.locator('[data-page-id]').first().boundingBox()
+await page.mouse.click(tbox.x + 300, tbox.y + 500)
+await page.keyboard.type('x')
+await page.keyboard.press('Escape')
+await Promise.all([page.waitForEvent('download'), page.click('[data-testid=download]')])
+await page.waitForFunction(() => [...document.querySelectorAll('[data-sonner-toast]')].some((t) => /Built on this device in \d/.test(t.textContent ?? '')), null, { timeout: 15000 })
+console.log('trust pages ok')
+
 assert.deepEqual(
   problems.filter((p) => !/Failed to load resource/.test(p)),
   [],

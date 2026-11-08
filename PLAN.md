@@ -446,6 +446,14 @@ Offline indicator once the service worker has cached the app, "Built on this dev
 the landing page and `/about` copy. **I will ask you for the business model and licence wording
 before writing any of it.**
 
+**As built:**
+
+- Landing trust strip: files never leave the device, free forever, a live offline badge, About & privacy.
+- `/about` explains how to verify each claim (CSP, Network tab, offline, source), shows offline
+  readiness, has "Forget everything on this device", and lists honest limits and licences.
+- Every download toast says "Built on this device in X s". MIT LICENSE added.
+- Checked in `test:prod`.
+
 ### Phase 8 — Performance budgets
 
 Fixtures: a 500-page text PDF, a 150 MB image scan and a 2,000-page PDF. `npm run test:perf` reports:

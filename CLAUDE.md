@@ -5,6 +5,11 @@ rendering/text extraction, @cantoo/pdf-lib + @pdf-lib/fontkit for writing, react
 overlay, Zustand + zundo for state/undo, IndexedDB autosave, PWA. Hosted as static assets on a
 Cloudflare **Worker** (not Pages).
 
+## Product promises (the user's wording — keep it)
+
+Free forever, no ads, no account, no limits, no watermarks. Code under the MIT licence (LICENSE).
+Every promise on /about must stay checkable (CSP header, Network tab, offline, source).
+
 ## Non-negotiable rules
 
 - **Files never leave the device.** No backend, no analytics, no third-party requests. The CSP in
@@ -63,7 +68,8 @@ src/
   lib/export/export.worker.ts  builds the output PDF in a Web Worker
   lib/export/matrix.ts      affine maths; page-space ↔ PDF user space
   lib/export/fontkit-compat.ts  adapter fixing @pdf-lib/fontkit issues (see gotchas)
-  features/landing/         drop zone, password dialog
+  features/landing/         drop zone, password dialog, trust strip (offline badge, About link)
+  features/about/About.tsx  /about (lazy): how to verify privacy, offline status, forget this device, limits, licences
   features/editor/          Editor shell, Viewer (zoom/pinch/virtualization), PageView/PageCanvas,
                             PageOverlay (Konva), InlineTextEditor, Thumbnails, PropertiesPanel, toolbars
   lib/text/capture.ts       every glyph pdf.js draws (operator list): position, font, size, Tc/Tw/Tz/Ts, colour

@@ -6,6 +6,7 @@ import { OpenFailure, openFile, resumeSaved } from '@/lib/open-document'
 import { peekSavedName } from '@/lib/persist'
 import { useSession } from '@/store/session'
 import { cn } from '@/lib/utils'
+import { useOfflineStatus } from '@/hooks/use-offline'
 
 // The dialog (and Radix' focus/scroll machinery) is only needed for protected files.
 const PasswordDialog = lazy(() => import('./PasswordDialog').then((m) => ({ default: m.PasswordDialog })))
@@ -146,7 +147,7 @@ export function Landing() {
                   <h1 className="text-2xl font-semibold tracking-tight text-balance md:text-3xl">
                     {dragging ? 'Release to open' : canDrop ? 'Drop a PDF to start editing' : 'Open a PDF to start editing'}
                   </h1>
-                  <p className="text-muted-foreground">Edit text, add images, reorder pages.</p>
+                  <p className="text-muted-foreground">Edit text, fill forms, sign, annotate, redact, merge and compress.</p>
                 </div>
                 <Button size="lg" className="h-12 rounded-xl px-6 text-base" tabIndex={-1}>
                   Choose PDF
@@ -165,10 +166,7 @@ export function Landing() {
           </div>
 
           <div className="mt-4 flex flex-col items-center gap-3 text-sm text-muted-foreground sm:flex-row sm:justify-between">
-            <span className="flex items-center gap-1.5">
-              <ShieldCheck className="size-4" />
-              Files never leave your device.
-            </span>
+            <TrustStrip />
             {savedName && !loading && (
               <Button
                 variant="ghost"
@@ -208,6 +206,28 @@ export function Landing() {
         </Suspense>
       )}
     </main>
+  )
+}
+
+/** What the app promises, each one checkable (details on /about). */
+function TrustStrip() {
+  const { ready, online } = useOfflineStatus()
+  return (
+    <ul className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1.5 sm:justify-start" data-testid="trust">
+      <li className="flex items-center gap-1.5">
+        <ShieldCheck className="size-4" /> Files never leave your device
+      </li>
+      <li>Free forever · no ads, no account</li>
+      <li className="flex items-center gap-1.5" data-testid="offline-badge">
+        <span className={cn('size-2 rounded-full', ready ? 'bg-emerald-500' : 'bg-muted-foreground/40')} aria-hidden />
+        {!online ? 'Offline — still works' : ready ? 'Works offline' : 'Getting ready for offline…'}
+      </li>
+      <li>
+        <a href="/about" className="font-medium text-foreground underline-offset-2 hover:underline">
+          About & privacy
+        </a>
+      </li>
+    </ul>
   )
 }
 

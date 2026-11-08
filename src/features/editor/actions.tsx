@@ -475,6 +475,7 @@ export async function downloadPdf() {
     keepEncryption = pick === 'keep'
   }
   const id = toast.loading('Preparing your PDF…')
+  const t0 = performance.now()
   try {
     const { bytes, notes, redaction, formNotes, compress } = await exportPdf((v) => toast.loading(`Preparing your PDF… ${Math.round(v * 100)}%`, { id }), {
       keepEncryption,
@@ -499,6 +500,8 @@ export async function downloadPdf() {
       }
     }
     downloadBytes(bytes, editedFileName(useSession.getState().fileName))
+    // Trust you can see: the file was made here, not on a server.
+    const built = `Built on this device in ${((performance.now() - t0) / 1000).toFixed(1)} s.`
     if (formNotes?.length)
       toast.warning(formNotes.length === 1 ? 'A form field couldn’t be filled in' : `${formNotes.length} form fields couldn’t be filled in`, {
         duration: 10000,
@@ -512,13 +515,15 @@ export async function downloadPdf() {
         description:
           `Checked the text under ${marks.length === 1 ? 'the mark' : `all ${marks.length} marks`}, the marked words throughout the file, and its metadata, attachments, comments and form fields.` +
           (redaction?.sanitized.length ? ` Also removed: ${redaction.sanitized.join(', ')}.` : '') +
-          extra,
+          extra +
+          ' ' +
+          built,
       })
     else if (cleanUp && !notes.length)
       toast.success('Downloaded', {
         id,
         duration: 6000,
-        description: (redaction?.sanitized.length ? `Removed: ${redaction.sanitized.join(', ')}.` : 'There was nothing to clean up.') + extra,
+        description: (redaction?.sanitized.length ? `Removed: ${redaction.sanitized.join(', ')}.` : 'There was nothing to clean up.') + extra + ' ' + built,
       })
     else if (notes.length)
       // Honest at the moment it matters: the old words are still inside the downloaded file.
@@ -532,10 +537,10 @@ export async function downloadPdf() {
         id,
         duration: 5000,
         description: compress.images
-          ? `${compress.images} ${compress.images === 1 ? 'image' : 'images'} resampled: ${mb(compress.before)} → ${mb(compress.after)}. File: ${mb(bytes.length)}.`
-          : 'No image needed resampling at this setting.',
+          ? `${compress.images} ${compress.images === 1 ? 'image' : 'images'} resampled: ${mb(compress.before)} → ${mb(compress.after)}. File: ${mb(bytes.length)}. ${built}`
+          : `No image needed resampling at this setting. ${built}`,
       })
-    else toast.success('Downloaded', { id, duration: 2500 })
+    else toast.success('Downloaded', { id, duration: 4000, description: built })
   } catch (err) {
     console.error(err)
     toast.error('Export failed. ' + (err instanceof Error ? err.message : ''), { id })

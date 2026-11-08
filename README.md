@@ -3,6 +3,9 @@
 Edit PDFs in the browser — change existing text, add text and images, redact, reorder/rotate/delete
 pages, download. Everything runs on your device; no file is ever uploaded. Installable and works offline.
 
+Free forever: no ads, no account, no limits, no watermarks. See `/about` in the app for how to verify
+that files never leave the device.
+
 ## Run locally
 
 Requires Node 20+.
@@ -36,6 +39,10 @@ The app is a static-assets-only Cloudflare Worker configured in `wrangler.jsonc`
 npm run build
 npx wrangler deploy
 ```
+
+## Licence
+
+MIT (see LICENSE). Bundled fonts keep their own licences (SIL OFL 1.1, Apache 2.0): public/fonts/LICENSE.txt.
 
 ## Notes
 
