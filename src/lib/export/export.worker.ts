@@ -33,12 +33,15 @@ import { FONT_FAMILIES, fontFileUrl, fontRuns, OBLIQUE_SHEAR } from '@/lib/fonts
 import { encodeLine, usesOriginal, type OriginalFont } from '@/lib/original-font'
 import { alignOffset, baselineOffset, splitLines } from '@/lib/text-layout'
 import { coversFor, layoutLine, type LineLayout, type Measure } from '@/lib/text/line-layout'
-import type { Cover, FontFamilyId, ImageElement, TextElement } from '@/types'
-import { collectGarbage, privateResources, pruneDeletedPages, rebuildPageTree } from './doc-structure'
+import type { Cover, FontFamilyId, ImageElement, RedactElement, TextElement } from '@/types'
+import { collectGarbage, privateResources, pruneDeletedPages, rebuildPageTree, removeAnnotations } from './doc-structure'
+import { annotationsUnder, redactPage, type Box, type ImageSwap } from '@/lib/content/redact'
+import { sanitize } from './sanitize'
+import { findLeaks, scrubStrings } from './verify-scan'
 import { compatFontkit } from './fontkit-compat'
 import { applySourceEncryption, readEncryption } from './keep-encryption'
 import { elementFrame, invert, mul, pdfToPage, type Mat } from './matrix'
-import type { ExportRequest, ExportResponse, RemovalNote } from './protocol'
+import type { ExportRequest, ExportResponse, RedactionReport, RemovalNote } from './protocol'
 import { clipAllows, planRemoval, type Anchor, type GlyphTarget, type RegionTarget } from '@/lib/content/remove-text'
 
 declare const self: DedicatedWorkerGlobalScope
@@ -46,8 +49,9 @@ declare const self: DedicatedWorkerGlobalScope
 self.onmessage = async (e: MessageEvent<ExportRequest>) => {
   try {
     const notes: RemovalNote[] = []
-    const bytes = await buildPdf(e.data, notes)
-    self.postMessage({ type: 'done', bytes, notes } satisfies ExportResponse, [bytes.buffer])
+    const out: { redaction?: RedactionReport } = {}
+    const bytes = await buildPdf(e.data, notes, out)
+    self.postMessage({ type: 'done', bytes, notes, redaction: out.redaction } satisfies ExportResponse, [bytes.buffer])
   } catch (err) {
     self.postMessage({ type: 'error', message: err instanceof Error ? err.message : String(err) } satisfies ExportResponse)
   }
@@ -55,7 +59,7 @@ self.onmessage = async (e: MessageEvent<ExportRequest>) => {
 
 const progress = (value: number) => self.postMessage({ type: 'progress', value } satisfies ExportResponse)
 
-async function buildPdf(req: ExportRequest, notes: RemovalNote[]): Promise<Uint8Array> {
+async function buildPdf(req: ExportRequest, notes: RemovalNote[], out: { redaction?: RedactionReport }): Promise<Uint8Array> {
   // Edit the source document itself (not copies of its pages in a new one) so forms, outlines,
   // named destinations, page labels, tags, metadata and attachments survive.
   const enc = req.keepEncryption ? await readEncryption(req.bytes, req.password) : null
@@ -78,11 +82,13 @@ async function buildPdf(req: ExportRequest, notes: RemovalNote[]): Promise<Uint8
     if (info instanceof PDFRef && doc.context.lookup(info) instanceof PDFDict) doc.context.trailerInfo.Info = info
   }
   // Scan-matched edits are hard to spot by eye; say so in the metadata.
-  if (req.elements.some((el) => el.kind === 'text' && el.scan)) {
+  const scanNote = () => {
+    if (!req.elements.some((el) => el.kind === 'text' && el.scan)) return
     const prev = doc.getKeywords()
     const note = 'Edited with Free PDF Editor: text on scanned pages was altered'
     if (!prev?.includes(note)) doc.setKeywords([...(prev ? [prev] : []), note])
   }
+  scanNote()
 
   const pages = doc.getPages()
   const order = req.pages.map((p) => p.srcIndex)
@@ -193,9 +199,54 @@ async function buildPdf(req: ExportRequest, notes: RemovalNote[]): Promise<Uint8
       }
       if (el.kind === 'text') {
         if (!drawOriginalText(page, toPdf, el, originals)) await drawText(page, toPdf, el, fonts)
-      } else await drawImage(page, toPdf, el, req, images, doc)
+      } else if (el.kind === 'image') await drawImage(page, toPdf, el, req, images, doc)
     }
     progress(0.15 + (0.6 * (i + 1)) / req.pages.length)
+  }
+
+  // Redaction (Phase 4): a second pass over the finished page content — edits and added text
+  // included — once pdf-lib has written its fonts (their widths locate the glyphs).
+  const marks = req.elements.filter((el): el is RedactElement => el.kind === 'redact')
+  const report: RedactionReport = { problems: [], leaks: [], removed: { glyphs: 0, images: 0, paths: 0, annotations: 0 }, sanitized: [], sanitizeNotes: [] }
+  const markedPages: PDFPage[] = []
+  if (marks.length) {
+    await doc.flush()
+    const deadAnnots: ReturnType<typeof annotationsUnder> = []
+    for (let i = 0; i < req.pages.length; i++) {
+      const item = req.pages[i]
+      const mine = marks.filter((m) => m.pageId === item.id)
+      if (!mine.length) continue
+      const info = req.sourcePages[item.srcIndex]
+      const page = pages[item.srcIndex]
+      markedPages.push(page)
+      const pageMat = pdfToPage(info.view, info.rotate)
+      const toPage = [pageMat.a, pageMat.b, pageMat.c, pageMat.d, pageMat.e, pageMat.f] as [number, number, number, number, number, number]
+      const rects: Box[] = mine.map((m) => [m.x, m.y, m.x + m.width, m.y + m.height])
+      const swaps: ImageSwap[] = []
+      for (const patch of req.imagePatches[item.id] ?? []) {
+        const img = patch.mime === 'image/png' ? await doc.embedPng(patch.bytes) : await doc.embedJpg(patch.bytes)
+        swaps.push({ ctm: patch.ctm, ref: img.ref })
+      }
+      const r = redactPage(page, toPage, rects, swaps)
+      for (const why of r.problems) report.problems.push(`Page ${i + 1}: ${why} is under a mark and can’t be removed.`)
+      report.removed.glyphs += r.glyphs
+      report.removed.images += r.images
+      report.removed.paths += r.paths
+      deadAnnots.push(...annotationsUnder(page, toPage, rects))
+      // The opaque box, on top of everything left on the page.
+      const toPdf = invert(pageMat)
+      for (const m of mine) drawCover(page, toPdf, { x: m.x, y: m.y, width: m.width, height: m.height, color: '#000000', original: '' })
+    }
+    report.removed.annotations = removeAnnotations(doc, pages, deadAnnots)
+    // Marked words in bookmark titles and tag texts.
+    scrubStrings(doc, marks.flatMap((m) => (m.text ? [m.text] : [])))
+  }
+  const kept = req.pages.map((p) => pages[p.srcIndex])
+  if (Object.values(req.sanitize).some(Boolean)) {
+    const r = sanitize(doc, kept, req.sanitize)
+    report.sanitized = r.removed
+    report.sanitizeNotes = r.notes
+    if (req.sanitize.metadata) scanNote()
   }
 
   // Page order, deleted pages and everything that pointed at them; then drop unreachable objects
@@ -204,6 +255,12 @@ async function buildPdf(req: ExportRequest, notes: RemovalNote[]): Promise<Uint8
   pruneDeletedPages(doc, pages, order)
   await doc.flush()
   collectGarbage(doc.context)
+  if (marks.length || Object.values(req.sanitize).some(Boolean)) {
+    report.leaks = findLeaks(doc, kept, markedPages, marks.flatMap((m) => (m.text ? [m.text] : [])))
+    out.redaction = report
+    // Never hand out a file that still holds what was marked.
+    if (report.problems.length || report.leaks.length) return new Uint8Array()
+  }
   if (enc) applySourceEncryption(doc, enc)
   progress(0.85)
 

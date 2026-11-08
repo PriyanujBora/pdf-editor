@@ -96,11 +96,12 @@ function toColor(arg: unknown): string | null {
   return null
 }
 
-export async function captureGlyphs(page: PDFPageProxy): Promise<{ glyphs: CapturedGlyph[]; fonts: Map<string, CapturedFont> }> {
+/** `rotation`: viewport rotation (default: the page's /Rotate), e.g. to read an exported page in source page space. */
+export async function captureGlyphs(page: PDFPageProxy, rotation?: number): Promise<{ glyphs: CapturedGlyph[]; fonts: Map<string, CapturedFont> }> {
   const { OPS, AnnotationMode } = await loadPdfJs()
   // Page content only: annotation appearances (form field values, stamps) are not page text.
   const ops = await page.getOperatorList({ annotationMode: AnnotationMode.DISABLE })
-  const vp = page.getViewport({ scale: 1 })
+  const vp = page.getViewport(rotation === undefined ? { scale: 1 } : { scale: 1, rotation })
   const fonts = new Map<string, CapturedFont>()
   const glyphs: CapturedGlyph[] = []
 

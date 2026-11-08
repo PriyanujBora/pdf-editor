@@ -1,4 +1,4 @@
-import { Files, SlidersHorizontal } from 'lucide-react'
+import { Files, Search, SlidersHorizontal } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useUi } from '@/store/ui'
 import { pickImage } from './actions'
@@ -61,9 +61,9 @@ export function MobileToolbar() {
       <BarButton testId="pages" label="Pages" icon={Files} onClick={() => useUi.getState().set({ thumbsOpen: true })} />
       <BarButton
         testId="props"
-        label="Style"
-        icon={SlidersHorizontal}
-        disabled={!hasSelection}
+        label={tool === 'redact' && !hasSelection ? 'Find' : 'Style'}
+        icon={tool === 'redact' && !hasSelection ? Search : SlidersHorizontal}
+        disabled={!hasSelection && tool !== 'redact'}
         onClick={() => useUi.getState().set({ propsOpen: true, editingId: null })}
       />
     </nav>

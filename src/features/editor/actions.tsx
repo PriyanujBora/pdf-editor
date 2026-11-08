@@ -1,6 +1,7 @@
 import { LockKeyhole } from 'lucide-react'
 import { toast } from 'sonner'
 import { choose } from './choice'
+import { blockedReasons, confirmRedaction, explain, liveMarks, redactionConflicts } from './redact-download'
 import { downloadBytes, editedFileName, exportPdf } from '@/lib/export/export-client'
 import { ImageError, ingestImage } from '@/lib/images'
 import { uid } from '@/lib/ids'
@@ -338,6 +339,20 @@ export async function downloadPdf() {
   if (exporting) return
   exporting = true
   useUi.getState().set({ editingId: null })
+  const marks = liveMarks()
+  const cleanUp = Object.values(useSession.getState().sanitize).some(Boolean)
+  if (marks.length || cleanUp) {
+    const conflicts = redactionConflicts(marks)
+    if (conflicts.length) {
+      await explain('Can’t redact yet', 'Some things on the marked pages can’t be redacted:', conflicts)
+      exporting = false
+      return
+    }
+    if (!(await confirmRedaction(marks))) {
+      exporting = false
+      return
+    }
+  }
   // Password-protected input: the user decides whether the download stays protected.
   let keepEncryption = true
   if (useSession.getState().encrypted) {
@@ -363,10 +378,43 @@ export async function downloadPdf() {
   }
   const id = toast.loading('Preparing your PDF…')
   try {
-    const { bytes, notes } = await exportPdf((v) => toast.loading(`Preparing your PDF… ${Math.round(v * 100)}%`, { id }), { keepEncryption })
+    const { bytes, notes, redaction } = await exportPdf((v) => toast.loading(`Preparing your PDF… ${Math.round(v * 100)}%`, { id }), { keepEncryption })
     useSession.getState().set({ notRemoved: Object.fromEntries(notes.map((n) => [n.elementId, n.reason])) })
+    if (redaction && (redaction.problems.length || redaction.leaks.length)) {
+      toast.error('Nothing was downloaded', { id, duration: 5000 })
+      await explain('Nothing was downloaded', 'The redaction couldn’t be completed safely:', blockedReasons(redaction))
+      return
+    }
+    if (marks.length) {
+      // Open the result again with an independent reader and make sure nothing marked survived.
+      toast.loading('Checking the redacted file…', { id })
+      const s = useSession.getState()
+      const { verifyRedaction } = await import('@/lib/redact/verify')
+      const v = await verifyRedaction(bytes, keepEncryption && s.encrypted ? s.password : '', useDoc.getState().pages, s.sourcePages, marks, s.pdf!)
+      if (v.problems.length) {
+        toast.error('Nothing was downloaded', { id, duration: 5000 })
+        await explain('Nothing was downloaded', 'The check after redacting found something that should be gone:', v.problems)
+        return
+      }
+    }
     downloadBytes(bytes, editedFileName(useSession.getState().fileName))
-    if (notes.length)
+    const extra = redaction?.sanitizeNotes.length ? ' ' + redaction.sanitizeNotes.join(' ') : ''
+    if (marks.length && !notes.length)
+      toast.success('Redacted and verified: 0 matches remain', {
+        id,
+        duration: 8000,
+        description:
+          `Checked the text under ${marks.length === 1 ? 'the mark' : `all ${marks.length} marks`}, the marked words throughout the file, and its metadata, attachments, comments and form fields.` +
+          (redaction?.sanitized.length ? ` Also removed: ${redaction.sanitized.join(', ')}.` : '') +
+          extra,
+      })
+    else if (cleanUp && !notes.length)
+      toast.success('Downloaded', {
+        id,
+        duration: 6000,
+        description: (redaction?.sanitized.length ? `Removed: ${redaction.sanitized.join(', ')}.` : 'There was nothing to clean up.') + extra,
+      })
+    else if (notes.length)
       // Honest at the moment it matters: the old words are still inside the downloaded file.
       toast.warning(notes.length === 1 ? 'One edit couldn’t remove the old text' : `${notes.length} edits couldn’t remove the old text`, {
         id,

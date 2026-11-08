@@ -13,6 +13,9 @@ export interface DocState {
 
   reset: (pages: PageItem[], elements?: Record<string, EditorElement>) => void
   addElement: (el: EditorElement) => void
+  /** Several elements in one undo step (Find & redact). */
+  addElements: (els: EditorElement[]) => void
+  removeElements: (ids: string[]) => void
   /** `merge: false` forces a separate undo step (drag/transform ends). */
   updateElement: (id: string, patch: Partial<EditorElement>, opts?: { merge?: boolean }) => void
   removeElement: (id: string) => void
@@ -55,6 +58,17 @@ export const useDoc = create<DocState>()(
       reset: (pages, elements = {}) => set({ pages, elements }),
 
       addElement: (el) => set((s) => ({ elements: { ...s.elements, [el.id]: el } })),
+
+      addElements: (els) => {
+        if (els.length) set((s) => ({ elements: { ...s.elements, ...Object.fromEntries(els.map((e) => [e.id, e])) } }))
+      },
+
+      removeElements: (ids) =>
+        set((s) => {
+          const next = { ...s.elements }
+          for (const id of ids) delete next[id]
+          return { elements: next }
+        }),
 
       updateElement: (id, patch, opts) => {
         mergeKey = opts?.merge === false ? null : id + ':' + Object.keys(patch).sort().join(',')

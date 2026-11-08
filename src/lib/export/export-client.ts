@@ -1,6 +1,14 @@
 import { useDoc } from '@/store/document'
 import { useSession } from '@/store/session'
-import type { ExportRequest, ExportResponse, RemovalNote } from './protocol'
+import type { ImagePatch } from '@/lib/redact/images'
+import type { ExportRequest, ExportResponse, RedactionReport, RemovalNote } from './protocol'
+
+export interface ExportResult {
+  bytes: Uint8Array
+  notes: RemovalNote[]
+  /** Present when the download redacts or cleans up; non-empty problems/leaks = no file (bytes empty). */
+  redaction?: RedactionReport
+}
 
 /** True when the download would be the original file: no edits, same pages in the same order. */
 export function isUnchanged() {
@@ -9,7 +17,8 @@ export function isUnchanged() {
   const pageIds = new Set(d.pages.map((p) => p.id))
   const hasEdits = Object.values(d.elements).some((el) => pageIds.has(el.pageId))
   const samePages = d.pages.length === s.sourcePages.length && d.pages.every((p, i) => p.srcIndex === i && p.rotation === 0)
-  return !hasEdits && samePages
+  const cleanUp = Object.values(s.sanitize).some(Boolean)
+  return !hasEdits && samePages && !cleanUp
 }
 
 /**
@@ -20,7 +29,7 @@ export function isUnchanged() {
 export async function exportPdf(
   onProgress?: (v: number) => void,
   opts: { keepEncryption?: boolean; forceRebuild?: boolean } = {},
-): Promise<{ bytes: Uint8Array; notes: RemovalNote[] }> {
+): Promise<ExportResult> {
   const s = useSession.getState()
   const d = useDoc.getState()
   if (!s.bytes) throw new Error('No document open')
@@ -43,8 +52,22 @@ export async function exportPdf(
     for (const el of scanEls) if (el.kind === 'text' && isScanText(el)) scanPatches[el.id] = await patchPng(el)
   }
 
+  // Images under redaction marks are decoded and blacked out here (pdf.js reads every image format).
+  const imagePatches: Record<string, ImagePatch[]> = {}
+  const marked = new Set(elements.flatMap((el) => (el.kind === 'redact' ? [el.pageId] : [])))
+  if (marked.size && s.pdf) {
+    const { redactedImages } = await import('@/lib/redact/images')
+    for (const page of d.pages) {
+      if (!marked.has(page.id)) continue
+      const rects = elements.flatMap((el) => (el.kind === 'redact' && el.pageId === page.id ? [el] : []))
+      imagePatches[page.id] = await redactedImages(await s.pdf.getPage(page.srcIndex + 1), s.sourcePages[page.srcIndex], rects)
+    }
+  }
+
   const req: ExportRequest = {
     scanPatches,
+    imagePatches,
+    sanitize: s.sanitize,
     bytes: s.bytes,
     password: s.password,
     keepEncryption,
@@ -56,13 +79,13 @@ export async function exportPdf(
   }
 
   const worker = new Worker(new URL('./export.worker.ts', import.meta.url), { type: 'module' })
-  return new Promise<{ bytes: Uint8Array; notes: RemovalNote[] }>((resolve, reject) => {
+  return new Promise<ExportResult>((resolve, reject) => {
     worker.onmessage = (e: MessageEvent<ExportResponse>) => {
       const m = e.data
       if (m.type === 'progress') onProgress?.(m.value)
       else {
         worker.terminate()
-        if (m.type === 'done') resolve({ bytes: m.bytes, notes: m.notes })
+        if (m.type === 'done') resolve({ bytes: m.bytes, notes: m.notes, redaction: m.redaction })
         else reject(new Error(m.message))
       }
     }

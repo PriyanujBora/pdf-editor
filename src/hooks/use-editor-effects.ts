@@ -11,9 +11,9 @@ export function useAutosave() {
     let timer: ReturnType<typeof setTimeout> | undefined
     const flush = () => {
       const { pages, elements } = useDoc.getState()
-      const { fileName, status } = useSession.getState()
+      const { fileName, status, sanitize } = useSession.getState()
       if (status !== 'ready') return
-      void saveState({ fileName, pages, elements }).catch(() => {})
+      void saveState({ fileName, pages, elements, sanitize }).catch(() => {})
     }
     const unsubDoc = useDoc.subscribe((s, prev) => {
       if (s.pages === prev.pages && s.elements === prev.elements) return
@@ -22,6 +22,10 @@ export function useAutosave() {
     })
     const unsubAssets = useSession.subscribe((s, prev) => {
       if (s.assets !== prev.assets) void saveAssets(s.assets).catch(() => {})
+      if (s.sanitize !== prev.sanitize) {
+        clearTimeout(timer)
+        timer = setTimeout(flush, 600)
+      }
     })
     const onHide = () => document.visibilityState === 'hidden' && flush()
     document.addEventListener('visibilitychange', onHide)
@@ -74,6 +78,7 @@ export function useShortcuts() {
         if (key === 'v') ui.setTool('select')
         else if (key === 't') ui.setTool('text')
         else if (key === 'e') ui.setTool('edit-text')
+        else if (key === 'r') ui.setTool('redact')
         else if (ui.selectedId && e.key.startsWith('Arrow')) {
           e.preventDefault()
           const el = useDoc.getState().elements[ui.selectedId]

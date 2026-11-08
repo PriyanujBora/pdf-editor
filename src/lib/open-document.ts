@@ -2,9 +2,9 @@ import { classifyError, loadPdfJs, PDFJS_ASSET_OPTIONS, type OpenError } from '@
 import { clearSaved, loadSaved, saveSource, saveState } from '@/lib/persist'
 import { uid } from '@/lib/ids'
 import { clearHistory, useDoc } from '@/store/document'
-import { useSession } from '@/store/session'
+import { NO_SANITIZE, useSession } from '@/store/session'
 import { useUi } from '@/store/ui'
-import type { EditorElement, ImageAsset, PageItem, Rotation, SourcePageInfo } from '@/types'
+import type { EditorElement, ImageAsset, PageItem, Rotation, SanitizeOptions, SourcePageInfo } from '@/types'
 
 export const MAX_FILE_BYTES = 512 * 1024 * 1024
 
@@ -19,7 +19,7 @@ export class OpenFailure extends Error {
 interface OpenOptions {
   password?: string
   /** When resuming an autosaved session. */
-  restore?: { pages: PageItem[] | null; elements: Record<string, EditorElement>; assets: Record<string, ImageAsset> }
+  restore?: { pages: PageItem[] | null; elements: Record<string, EditorElement>; assets: Record<string, ImageAsset>; sanitize?: SanitizeOptions }
 }
 
 /**
@@ -80,6 +80,7 @@ export async function openDocument(bytes: Uint8Array, fileName: string, opts: Op
       import('@/lib/pdf/text-blocks').then((m) => m.clearTextBlockCache()),
       import('@/lib/scan/compose').then((m) => m.clearScanCaches()),
       import('@/lib/scan/pixels').then((m) => m.clearPixelCache()),
+      import('@/lib/redact/find').then((m) => m.clearSearchCache()),
     ])
     const encrypted = !!opts.password || (await pdf.getPermissions().catch(() => null)) !== null
     const bookmarks = await bookmarksByPage(pdf).catch(() => ({}))
@@ -94,6 +95,7 @@ export async function openDocument(bytes: Uint8Array, fileName: string, opts: Op
       pdf,
       sourcePages,
       assets: restored?.assets ?? {},
+      sanitize: { ...NO_SANITIZE, ...restored?.sanitize },
     })
     useDoc.getState().reset(pages, restored?.elements ?? {})
     clearHistory()
@@ -146,15 +148,15 @@ export async function resumeSaved(password?: string) {
   if (!saved) throw new OpenFailure({ kind: 'invalid', message: 'The saved session could not be found.' })
   return openDocument(saved.bytes, saved.fileName, {
     password,
-    restore: { pages: saved.meta?.pages ?? null, elements: saved.meta?.elements ?? {}, assets: saved.assets },
+    restore: { pages: saved.meta?.pages ?? null, elements: saved.meta?.elements ?? {}, assets: saved.assets, sanitize: saved.meta?.sanitize },
   })
 }
 
 /** Back to the landing page. The autosave is kept so it can be resumed. */
 export async function closeDocument() {
   const { pages, elements } = useDoc.getState()
-  const { fileName, status } = useSession.getState()
-  if (status === 'ready') await saveState({ fileName, pages, elements }).catch(() => {})
+  const { fileName, status, sanitize } = useSession.getState()
+  if (status === 'ready') await saveState({ fileName, pages, elements, sanitize }).catch(() => {})
   useSession.getState().close()
   useDoc.getState().reset([], {})
   clearHistory()

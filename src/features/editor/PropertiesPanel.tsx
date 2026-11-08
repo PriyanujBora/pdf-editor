@@ -31,6 +31,7 @@ import { useUi } from '@/store/ui'
 import type { EditorElement, FontFamilyId, ImageElement, TextAlign, TextElement } from '@/types'
 import { deleteSelected } from './actions'
 import { TOOLS } from './tools'
+import { RedactPanel } from './RedactPanel'
 
 const SWATCHES = ['#111111', '#ffffff', '#dc2626', '#ea580c', '#16a34a', '#2563eb', '#7c3aed']
 
@@ -326,9 +327,12 @@ export function PropertiesPanel({ className }: { className?: string }) {
   const el = useDoc((s) => (selectedId ? s.elements[selectedId] : undefined))
   const tool = useUi((s) => s.tool)
 
+  const marks = useDoc((s) => Object.values(s.elements).filter((e) => e.kind === 'redact').length)
   // Scan-matched text is locked to its line; edited printed text moves but doesn't rotate.
   const locked = el?.kind === 'text' && (!!el.scan || !!el.source)
 
+  if (el?.kind === 'redact') return <RedactPanel mark={el} />
+  if (!el && tool === 'redact') return <RedactPanel />
   if (!el) {
     const t = TOOLS.find((x) => x.id === tool)
     return (
@@ -337,6 +341,11 @@ export function PropertiesPanel({ className }: { className?: string }) {
           <MousePointerClick className="mt-0.5 size-4 shrink-0" />
           <p>{t && tool !== 'select' ? t.hint + '.' : 'Tap any text on the page to edit it, or select something you added.'}</p>
         </div>
+        {marks > 0 && (
+          <p className="rounded-xl border border-destructive/30 px-3 py-2 text-xs">
+            {marks} {marks === 1 ? 'area is' : 'areas are'} marked for redaction — removed when you download.
+          </p>
+        )}
         <ul className="grid gap-2 px-1 text-xs">
           {TOOLS.filter((x) => x.id !== 'select').map((x) => (
             <li key={x.id} className="flex items-center gap-2">

@@ -1,6 +1,15 @@
 import { create } from 'zustand'
 import type { PDFDocumentProxy } from 'pdfjs-dist'
-import type { ImageAsset, SourcePageInfo } from '@/types'
+import type { ImageAsset, SanitizeOptions, SourcePageInfo } from '@/types'
+
+export const NO_SANITIZE: SanitizeOptions = {
+  metadata: false,
+  javascript: false,
+  attachments: false,
+  hiddenLayers: false,
+  comments: false,
+  formValues: false,
+}
 
 /** Non-undoable data about the open file. */
 interface SessionState {
@@ -18,6 +27,8 @@ interface SessionState {
   bookmarks: Record<number, string[]>
   /** Edits whose old text the last download could not remove (element id → reason). */
   notRemoved: Record<string, string>
+  /** Clean-up applied on download (Redact panel). */
+  sanitize: SanitizeOptions
   pdf: PDFDocumentProxy | null
   sourcePages: SourcePageInfo[]
   assets: Record<string, ImageAsset>
@@ -36,6 +47,7 @@ export const useSession = create<SessionState>()((set, get) => ({
   encrypted: false,
   bookmarks: {},
   notRemoved: {},
+  sanitize: NO_SANITIZE,
   pdf: null,
   sourcePages: [],
   assets: {},
@@ -44,6 +56,6 @@ export const useSession = create<SessionState>()((set, get) => ({
   addAsset: (a) => set((s) => ({ assets: { ...s.assets, [a.id]: a } })),
   close: () => {
     void get().pdf?.loadingTask.destroy()
-    set({ status: 'empty', progress: 0, fileName: '', bytes: null, password: '', encrypted: false, bookmarks: {}, notRemoved: {}, pdf: null, sourcePages: [], assets: {} })
+    set({ status: 'empty', progress: 0, fileName: '', bytes: null, password: '', encrypted: false, bookmarks: {}, notRemoved: {}, sanitize: NO_SANITIZE, pdf: null, sourcePages: [], assets: {} })
   },
 }))

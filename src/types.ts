@@ -233,9 +233,31 @@ export interface ImageElement extends BaseElement {
   height: number
 }
 
+/**
+ * A redaction mark (Phase 4): everything under it is removed from the downloaded file — text,
+ * image pixels, drawings, annotations — and an opaque box is drawn. Axis-aligned (rotation 0).
+ */
+export interface RedactElement extends BaseElement {
+  kind: 'redact'
+  width: number
+  height: number
+  /** The text this mark was made for (Find & redact, a tapped word): checked again after applying. */
+  text?: string
+}
+
+/** Document clean-up applied on download (Redact panel). */
+export interface SanitizeOptions {
+  metadata: boolean
+  javascript: boolean
+  attachments: boolean
+  hiddenLayers: boolean
+  comments: boolean
+  formValues: boolean
+}
+
 export type { OriginalFont }
 
-export type EditorElement = TextElement | ImageElement
+export type EditorElement = TextElement | ImageElement | RedactElement
 
 export interface ImageAsset {
   id: string

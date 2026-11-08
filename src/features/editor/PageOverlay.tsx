@@ -9,12 +9,14 @@ import { getTextBlocks, type TextBlock } from '@/lib/pdf/text-blocks'
 import { useDoc } from '@/store/document'
 import { useSession } from '@/store/session'
 import { useUi } from '@/store/ui'
-import type { EditorElement, PageItem } from '@/types'
+import type { EditorElement, PageItem, PtRect } from '@/types'
 import { createTextAt, editTextBlock } from './actions'
 import { ImageNode } from './elements/ImageNode'
 import { TextNode } from './elements/TextNode'
 import { ScanTextNode } from './elements/ScanTextNode'
 import { SourceTextNode } from './elements/SourceTextNode'
+import { RedactNode } from './elements/RedactNode'
+import { addAreaMark, markWordAt, MIN_MARK } from './redact-actions'
 import { activeInput } from './active-input'
 import { isScanText } from '@/lib/scan/compose'
 import { caretAt, type LineLayout } from '@/lib/text/line-layout'
@@ -58,6 +60,9 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
   const pdf = useSession((s) => s.pdf)
   const coarse = useMemo(() => isCoarsePointer(), [])
   const [blocks, setBlocks] = useState<TextBlock[] | null>(null)
+  /** Area mark being dragged out with the Redact tool. */
+  const [draft, setDraft] = useState<PtRect | null>(null)
+  const drawing = useRef<{ x0: number; y0: number; cancel: () => void } | null>(null)
   /** Latest layout of each edited source line (caret placement from pointer x). */
   const layouts = useRef(new Map<string, LineLayout>())
   const onLayout = useMemo(() => new Map<string, (l: LineLayout) => void>(), [])
@@ -159,6 +164,7 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
   const onStageTap = (e: KEvt) => {
     if (e.target !== e.target.getStage()) return
     const ui = useUi.getState()
+    if (ui.tool === 'redact') return // marks are made on press/release (onRedactPress)
     if (ui.tool === 'text') {
       const pos = groupRef.current?.getRelativePointerPosition()
       if (!pos) return
@@ -168,6 +174,56 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
       ui.set({ selectedId: null, editingId: null })
     }
   }
+
+  /** Redact tool: drag on the page to mark an area; a tap marks the word under it. */
+  const onRedactPress = (e: Konva.KonvaEventObject<PointerEvent>) => {
+    const ui = useUi.getState()
+    if (ui.tool !== 'redact' || e.target !== e.target.getStage() || !e.evt.isPrimary) return
+    const stage = e.target.getStage()
+    const start = groupRef.current?.getRelativePointerPosition()
+    if (!stage || !start) return
+    ui.set({ selectedId: null })
+    const clamp = (v: number, max: number) => Math.min(max, Math.max(0, v))
+    const rectTo = (p: { x: number; y: number }): PtRect => {
+      const x1 = clamp(p.x, width)
+      const y1 = clamp(p.y, height)
+      return { x: Math.min(start.x, x1), y: Math.min(start.y, y1), width: Math.abs(x1 - start.x), height: Math.abs(y1 - start.y) }
+    }
+    const pos = (ev: PointerEvent) => {
+      stage.setPointersPositions(ev)
+      return groupRef.current?.getRelativePointerPosition() ?? start
+    }
+    const move = (ev: PointerEvent) => {
+      if (ev.pointerId !== e.evt.pointerId) return
+      const r = rectTo(pos(ev))
+      if (r.width >= MIN_MARK || r.height >= MIN_MARK) setDraft(r)
+    }
+    // A second finger means pinch-zoom, not a mark.
+    const touch = (ev: TouchEvent) => ev.touches.length > 1 && cleanup()
+    const cleanup = () => {
+      window.removeEventListener('touchstart', touch)
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', cancel)
+      drawing.current = null
+      setDraft(null)
+    }
+    const up = (ev: PointerEvent) => {
+      if (ev.pointerId !== e.evt.pointerId) return
+      const r = rectTo(pos(ev))
+      cleanup()
+      if (r.width >= MIN_MARK && r.height >= MIN_MARK) addAreaMark(page.id, r)
+      else if (r.width < MIN_MARK && r.height < MIN_MARK) void markWordAt(page, start.x, start.y)
+    }
+    const cancel = () => cleanup()
+    drawing.current = { x0: start.x, y0: start.y, cancel }
+    window.addEventListener('touchstart', touch)
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', cancel)
+  }
+
+  useEffect(() => () => drawing.current?.cancel(), [])
 
   const handlersFor = useCallback((el: EditorElement) => {
     const select = () => {
@@ -183,7 +239,7 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
       const wasSelected = pressedSelected ?? ui.selectedId === el.id
       pressedSelected = null
       // Tapping an already-selected text (or any text with the text tools) edits it.
-      if (el.kind === 'text' && (wasSelected || ui.tool !== 'select')) {
+      if (el.kind === 'text' && (wasSelected || ui.tool !== 'select') && ui.tool !== 'redact') {
         primeKeyboard()
         const L = layouts.current.get(el.id)
         const pos = groupRef.current?.getRelativePointerPosition()
@@ -229,7 +285,8 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
       onTouchStart: (e: Konva.KonvaEventObject<TouchEvent>) => void pressCaret(e),
       onPointerDown: (e: Konva.KonvaEventObject<PointerEvent>) => {
         // Mouse/pen select on press so a drag can start immediately; touch waits for a tap.
-        if (e.evt.pointerType !== 'touch' && useUi.getState().tool === 'select') {
+        const t = useUi.getState().tool
+        if (e.evt.pointerType !== 'touch' && (t === 'select' || (t === 'redact' && el.kind === 'redact'))) {
           e.cancelBubble = true
           pressedSelected = useUi.getState().selectedId === el.id
           select()
@@ -290,7 +347,12 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
       className="absolute inset-0"
       onClick={onStageTap}
       onTap={onStageTap}
-      style={{ cursor: tool === 'text' ? 'text' : 'default' }}
+      onPointerDown={onRedactPress}
+      style={{
+        cursor: tool === 'text' ? 'text' : tool === 'redact' ? 'crosshair' : 'default',
+        // One finger draws marks with the Redact tool (two fingers still zoom).
+        touchAction: tool === 'redact' ? 'none' : undefined,
+      }}
     >
       <Layer>
         <Group ref={groupRef} x={gt.x} y={gt.y} rotation={gt.rotation} scaleX={zoom} scaleY={zoom}>
@@ -333,6 +395,7 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
             />
           ))}
 
+          <Group listening={tool !== 'redact'}>
           {elements.map((el) =>
             el.kind === 'text' && isScanText(el) ? (
               <ScanTextNode
@@ -369,7 +432,7 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
                 draggable={tool === 'select' && (!coarse || el.id === selectedId)}
                 {...handlersFor(el)}
               />
-            ) : (
+            ) : el.kind === 'image' ? (
               <ImageNode
                 key={el.id}
                 el={el}
@@ -377,20 +440,48 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
                 draggable={tool === 'select' && (!coarse || el.id === selectedId)}
                 {...handlersFor(el)}
               />
-            ),
+            ) : null,
+          )}
+          </Group>
+
+          {/* Redaction marks sit above everything they will remove. */}
+          {elements.map((el) =>
+            el.kind === 'redact' ? (
+              <RedactNode
+                key={el.id}
+                el={el}
+                selected={el.id === selectedId}
+                draggable={(tool === 'select' || tool === 'redact') && (!coarse || el.id === selectedId)}
+                {...handlersFor(el)}
+              />
+            ) : null,
+          )}
+          {draft && (
+            <Rect
+              x={draft.x}
+              y={draft.y}
+              width={draft.width}
+              height={draft.height}
+              fill="rgba(15,15,20,0.35)"
+              stroke="#e11d48"
+              strokeWidth={1.5}
+              strokeScaleEnabled={false}
+              dash={[5, 3]}
+              listening={false}
+            />
           )}
         </Group>
 
         <Transformer
           ref={trRef}
-          rotateEnabled={!(selectedEl?.kind === 'text' && selectedEl.source)}
+          rotateEnabled={!(selectedEl?.kind === 'text' && selectedEl.source) && selectedEl?.kind !== 'redact'}
           flipEnabled={false}
-          keepRatio
+          keepRatio={selectedEl?.kind !== 'redact'}
           enabledAnchors={
             // Edited original text moves but never changes size by accident: size is in the panel.
             selectedEl?.kind === 'text' && selectedEl.source
               ? []
-              : selectedEl?.kind === 'text'
+              : selectedEl?.kind === 'text' || (selectedEl?.kind === 'redact' && coarse)
               ? ['top-left', 'top-right', 'bottom-left', 'bottom-right']
               : [
                   'top-left',

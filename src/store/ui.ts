@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-export type Tool = 'select' | 'text' | 'edit-text'
+export type Tool = 'select' | 'text' | 'edit-text' | 'redact'
 
 interface UiState {
   tool: Tool

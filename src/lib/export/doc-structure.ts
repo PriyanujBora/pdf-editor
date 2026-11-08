@@ -333,6 +333,105 @@ export function pruneDeletedPages(doc: PDFDocument, pages: PDFPage[], order: num
   if (openD && gone.has(openD)) catalog.delete(N('OpenAction'))
 }
 
+/** Structure elements: drop OBJR kids that point at removed annotations. */
+function pruneObjr(ctx: PDFContext, node: PDFDict, dead: Set<PDFObject>, depth = 0) {
+  if (depth > 200) return
+  const k = node.get(N('K'))
+  if (k === undefined) return
+  const kids = k instanceof PDFArray ? k.asArray() : [k]
+  const out = kids.filter((kid) => {
+    const d = ctx.lookupMaybe(kid, PDFDict)
+    if (!d) return true
+    if (d.get(N('Type')) === N('OBJR')) return !dead.has(d.get(N('Obj')) as PDFObject)
+    pruneObjr(ctx, d, dead, depth + 1)
+    return true
+  })
+  if (out.length === kids.length) return
+  if (!out.length) node.delete(N('K'))
+  else node.set(N('K'), out.length === 1 && !(k instanceof PDFArray) ? out[0] : ctx.obj(out))
+}
+
+/**
+ * Removes annotations everywhere they are referenced: page /Annots, their popups, the form fields they
+ * belong to (a removed widget takes its whole field with it, every widget, so the value goes too), the
+ * structure tree. Returns how many annotations were removed.
+ */
+export function removeAnnotations(doc: PDFDocument, pages: PDFPage[], targets: PDFObject[]): number {
+  const ctx = doc.context
+  const dead = new Set<PDFObject>(targets)
+  if (!dead.size) return 0
+  const dict = (o: PDFObject | undefined) => ctx.lookupMaybe(o, PDFDict)
+  // Widgets → their terminal field; the field and all its widgets go.
+  const form = dict(doc.catalog.get(N('AcroForm')))
+  const deadFields = new Set<PDFObject>()
+  const widgetsOf = (f: PDFObject, out: PDFObject[] = []) => {
+    const d = dict(f)
+    const kids = d && ctx.lookupMaybe(d.get(N('Kids')), PDFArray)
+    if (kids) for (const kid of kids.asArray()) widgetsOf(kid, out)
+    else out.push(f)
+    return out
+  }
+  for (const t of [...dead]) {
+    const d = dict(t)
+    if (!d || d.get(N('Subtype')) !== N('Widget')) continue
+    const field = d.get(N('T')) !== undefined || d.get(N('FT')) !== undefined ? t : d.get(N('Parent'))
+    if (!field) continue
+    deadFields.add(field)
+    for (const w of widgetsOf(field)) dead.add(w)
+  }
+  // Popups of removed annotations, and annotations whose popup parent is removed.
+  for (const p of pages) {
+    const annots = ctx.lookupMaybe(p.node.get(N('Annots')), PDFArray)
+    if (!annots) continue
+    for (const a of annots.asArray()) {
+      const d = dict(a)
+      if (!d) continue
+      if (dead.has(a) && d.get(N('Popup'))) dead.add(d.get(N('Popup')) as PDFObject)
+      if (d.get(N('Subtype')) === N('Popup') && dead.has(d.get(N('Parent')) as PDFObject)) dead.add(a)
+    }
+  }
+  let removed = 0
+  for (const p of pages) {
+    const annots = ctx.lookupMaybe(p.node.get(N('Annots')), PDFArray)
+    if (!annots) continue
+    const out = annots.asArray().filter((a) => !dead.has(a))
+    removed += annots.size() - out.length
+    if (out.length !== annots.size()) p.node.set(N('Annots'), ctx.obj(out))
+  }
+  if (form) {
+    const prune = (arr: PDFArray | undefined): PDFObject[] | undefined => {
+      if (!arr) return undefined
+      const out: PDFObject[] = []
+      for (const f of arr.asArray()) {
+        if (deadFields.has(f) || dead.has(f)) continue
+        const d = dict(f)
+        const kids = d && ctx.lookupMaybe(d.get(N('Kids')), PDFArray)
+        if (kids) {
+          const k = prune(kids)!
+          if (!k.length) continue
+          d.set(N('Kids'), ctx.obj(k))
+        }
+        out.push(f)
+      }
+      return out
+    }
+    const fields = prune(ctx.lookupMaybe(form.get(N('Fields')), PDFArray))
+    if (fields) form.set(N('Fields'), ctx.obj(fields))
+  }
+  const tree = dict(doc.catalog.get(N('StructTreeRoot')))
+  if (tree) {
+    pruneObjr(ctx, tree, dead)
+    const deadKeys = new Set<number>()
+    for (const a of dead) {
+      const sp = dict(a)?.lookupMaybe(N('StructParent'), PDFNumber)
+      if (sp) deadKeys.add(sp.asNumber())
+    }
+    const c: Ctx = { ctx, gone: new Set(), named: new Map() }
+    filterTree(c, dict(tree.get(N('ParentTree'))), 'Nums', (k) => !(k instanceof PDFNumber && deadKeys.has(k.asNumber())))
+  }
+  return removed
+}
+
 /** Mark-and-sweep: pdf-lib writes every object it holds, reachable or not. */
 export function collectGarbage(ctx: PDFContext): number {
   const seen = new Set<PDFRef>()

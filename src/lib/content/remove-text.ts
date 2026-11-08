@@ -32,8 +32,8 @@ import {
 import { Encodings, Font, FontNames } from '@cantoo/pdf-lib/standard-fonts'
 
 const N = (n: string) => PDFName.of(n)
-type M = [number, number, number, number, number, number]
-const mul = (m: M, n: M): M => [
+export type M = [number, number, number, number, number, number]
+export const mul = (m: M, n: M): M => [
   m[0] * n[0] + m[2] * n[1],
   m[1] * n[0] + m[3] * n[1],
   m[0] * n[2] + m[2] * n[3],
@@ -52,7 +52,7 @@ type Operand =
   | { t: 'dict'; v: Record<string, Operand> }
   | { t: 'kw'; v: string }
 
-interface Op {
+export interface Op {
   op: string
   args: Operand[]
   start: number
@@ -205,7 +205,7 @@ function serialize(o: Operand): string {
 
 // --- Fonts ----------------------------------------------------------------------------
 
-interface FontInfo {
+export interface FontInfo {
   baseFont: string
   bytes: 1 | 2
   /** Advance in text-space units per 1 unit of font size (w × FontMatrix), spacing excluded. */
@@ -307,10 +307,50 @@ export interface DrawnGlyph {
   /** Where new text for this glyph can go in the page content: after its text object (ET), or after
    *  the Do that drew its form. With the CTM there (page-space based) and the clip (page space). */
   anchor: { op: number; ctm: M; clip: Clip }
+  /** Page-space bounding box of the glyph (advance × −0.25…0.8 em around the baseline). */
+  box: [number, number, number, number]
+}
+
+/** An image drawn by the content (redaction). */
+export interface DrawnImage {
+  stream: 'page' | number
+  op: number
+  /** XObject resource name ('' for inline images). */
+  name: string
+  /** Image space (unit square) → page space. */
+  ctm: M
+  width: number
+  height: number
+  kind: 'xobject' | 'inline' | 'mask'
+  nested: boolean
+}
+
+/** A painted path (redaction): operators [start, end] of its stream, page-space box including the stroke. */
+export interface DrawnPath {
+  stream: 'page' | number
+  start: number
+  end: number
+  box: [number, number, number, number]
+}
+
+/** Extra things `interpret` reports for redaction. */
+export interface Collect {
+  images: DrawnImage[]
+  paths: DrawnPath[]
+  /** Text-showing operators whose font couldn't be read (their glyphs can't be located). */
+  unknownText: number
+}
+
+export type Forms = Map<number, { name: string; xo: PDFStream; ops: Op[]; bytes: Uint8Array }>
+
+const boxOf = (m: M, x0: number, y0: number, x1: number, y1: number): [number, number, number, number] => {
+  const xs = [m[0] * x0 + m[2] * y0, m[0] * x1 + m[2] * y0, m[0] * x0 + m[2] * y1, m[0] * x1 + m[2] * y1]
+  const ys = [m[1] * x0 + m[3] * y0, m[1] * x1 + m[3] * y0, m[1] * x0 + m[3] * y1, m[1] * x1 + m[3] * y1]
+  return [Math.min(...xs) + m[4], Math.min(...ys) + m[5], Math.max(...xs) + m[4], Math.max(...ys) + m[5]]
 }
 
 /** Clip as a page-space rectangle; null = none; 'unknown' = a non-rectangular clip. */
-type Clip = [number, number, number, number] | null | 'unknown'
+export type Clip = [number, number, number, number] | null | 'unknown'
 
 interface GState {
   clip: Clip
@@ -323,23 +363,25 @@ interface GState {
   tfs: number
   font: FontInfo | null
   mode: number
+  lw: number
 }
 
-function decode(s: PDFStream): Uint8Array {
+export function decode(s: PDFStream): Uint8Array {
   if (s instanceof PDFRawStream) return decodePDFRawStream(s).decode()
   if (s instanceof PDFContentStream) return s.getUnencodedContents()
   return s.getContents()
 }
 
-function interpret(
+export function interpret(
   ctx: PDFContext,
   ops: Op[],
   resources: PDFDict | undefined,
   ctm0: M,
   stream: 'page' | number,
   out: DrawnGlyph[],
-  forms: Map<number, { name: string; xo: PDFStream; ops: Op[]; bytes: Uint8Array }>,
+  forms: Forms,
   nested: boolean,
+  collect?: Collect,
 ) {
   const fontCache = new Map<string, FontInfo | null>()
   const fontNamed = (name: string) => {
@@ -349,9 +391,20 @@ function interpret(
     fontCache.set(name, f)
     return f
   }
-  let g: GState = { clip: null, ctm: ctm0, tc: 0, tw: 0, th: 1, tl: 0, ts: 0, tfs: 0, font: null, mode: 0 }
+  let g: GState = { clip: null, ctm: ctm0, tc: 0, tw: 0, th: 1, tl: 0, ts: 0, tfs: 0, font: null, mode: 0, lw: 1 }
   let pathRect: [number, number, number, number] | null = null
   let pathComplex = false
+  // Redaction: where the current path started, its page-space box, whether it clips.
+  let pathStart = -1
+  let pathBox: [number, number, number, number] | null = null
+  let pathClips = false
+  const addPts = (oi: number, pts: number[]) => {
+    if (pathStart < 0) pathStart = oi
+    for (let k = 0; k + 1 < pts.length; k += 2) {
+      const [x, y] = apply(g.ctm, pts[k], pts[k + 1])
+      pathBox = pathBox ? [Math.min(pathBox[0], x), Math.min(pathBox[1], y), Math.max(pathBox[2], x), Math.max(pathBox[3], y)] : [x, y, x, y]
+    }
+  }
   let btStart = -1
   const pending: DrawnGlyph[] = []
   const apply = (m: M, x: number, y: number): [number, number] => [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]]
@@ -382,8 +435,12 @@ function interpret(
         pending.length = 0
         btStart = -1
         break
+      case 'w':
+        g.lw = num(a[0])
+        break
       case 're': {
         const [x, y, w, h] = a.map(num)
+        addPts(oi, [x, y, x + w, y, x, y + h, x + w, y + h])
         if (pathRect || pathComplex) pathComplex = true
         else {
           const pts = [apply(g.ctm, x, y), apply(g.ctm, x + w, y), apply(g.ctm, x, y + h), apply(g.ctm, x + w, y + h)]
@@ -400,9 +457,11 @@ function interpret(
       case 'y':
       case 'h':
         pathComplex = true
+        addPts(oi, a.map(num))
         break
       case 'W':
       case 'W*': {
+        pathClips = true
         if (pathComplex || !pathRect) g.clip = 'unknown'
         else if (g.clip === null) g.clip = pathRect
         else if (g.clip !== 'unknown') {
@@ -421,8 +480,17 @@ function interpret(
       case 'B*':
       case 'b':
       case 'b*':
+        if (collect && pathStart >= 0 && pathBox && !pathClips && o.op !== 'n') {
+          // Stroke ink reaches up to a line width out (caps, joins), in page units.
+          const sc = Math.sqrt(Math.abs(g.ctm[0] * g.ctm[3] - g.ctm[1] * g.ctm[2]))
+          const e = /[SsBb]/.test(o.op) ? Math.max(g.lw, 1) * sc : 0
+          collect.paths.push({ stream, start: pathStart, end: oi, box: [pathBox[0] - e, pathBox[1] - e, pathBox[2] + e, pathBox[3] + e] })
+        }
         pathRect = null
         pathComplex = false
+        pathStart = -1
+        pathBox = null
+        pathClips = false
         break
       case 'Tf':
         g.font = a[0]?.t === 'name' ? fontNamed(a[0].v) : null
@@ -487,6 +555,7 @@ function interpret(
         if (o.op === "'" || o.op === '"') tm = tlm = mul(tlm, [1, 0, 0, 1, 0, -g.tl])
         const items = o.op === 'TJ' ? (a[0]?.t === 'arr' ? a[0].v : []) : [a[a.length - 1]]
         const f = g.font
+        if (!f && collect && items.some((it) => it?.t === 'str' && it.v.length)) collect.unknownText++
         items.forEach((it, ii) => {
           if (!it) return
           if (it.t === 'num') {
@@ -517,6 +586,7 @@ function interpret(
               marks: marks.slice(),
               nested,
               anchor: { op: stream === 'page' ? -1 : stream, ctm: g.ctm, clip: g.clip },
+              box: boxOf(user, 0, g.ts - 0.25 * g.tfs, w0 * g.tfs * g.th, g.ts + 0.8 * g.tfs),
             }
             out.push(rec)
             if (stream === 'page' && btStart >= 0) pending.push(rec)
@@ -525,9 +595,18 @@ function interpret(
         })
         break
       }
+      case 'BI':
+        collect?.images.push({ stream, op: oi, name: '', ctm: g.ctm, width: 0, height: 0, kind: 'inline', nested })
+        break
       case 'Do': {
         if (a[0]?.t !== 'name') break
         const xo = resources?.lookupMaybe(N('XObject'), PDFDict)?.lookup(N(a[0].v))
+        if (xo instanceof PDFStream && xo.dict.get(N('Subtype')) === N('Image')) {
+          const dn = (k: string) => (xo.dict.lookup(N(k)) as PDFNumber | undefined)?.asNumber?.() ?? 0
+          const mask = String(xo.dict.lookup(N('ImageMask')) ?? '') === 'true'
+          collect?.images.push({ stream, op: oi, name: a[0].v, ctm: g.ctm, width: dn('Width'), height: dn('Height'), kind: mask ? 'mask' : 'xobject', nested })
+          break
+        }
         if (!(xo instanceof PDFStream) || xo.dict.get(N('Subtype')) !== N('Form')) break
         const fm = xo.dict.lookupMaybe(N('Matrix'), PDFArray)
         const matrix = (fm ? fm.asArray().map((x) => (ctx.lookup(x) as PDFNumber).asNumber()) : [1, 0, 0, 1, 0, 0]) as M
@@ -536,7 +615,7 @@ function interpret(
         const res = xo.dict.lookupMaybe(N('Resources'), PDFDict) ?? resources
         if (stream === 'page') forms.set(oi, { name: a[0].v, xo, ops: fops, bytes })
         const before = out.length
-        interpret(ctx, fops, res, mul(g.ctm, matrix), stream === 'page' ? oi : stream, out, forms, stream !== 'page')
+        interpret(ctx, fops, res, mul(g.ctm, matrix), stream === 'page' ? oi : stream, out, forms, stream !== 'page', collect)
         // Text drawn by a form: new text goes right after the Do, in the page's coordinate state here.
         if (stream === 'page') for (let k = before; k < out.length; k++) out[k].anchor = { op: oi, ctm: g.ctm, clip: g.clip }
         break
@@ -548,13 +627,13 @@ function interpret(
 // --- Rewriting ------------------------------------------------------------------------
 
 /** Raw splice: replace bytes [start, end) (start === end inserts). */
-interface Splice {
+export interface Splice {
   start: number
   end: number
   data: Uint8Array
 }
 
-function rewrite(bytes: Uint8Array, ops: Op[], glyphs: DrawnGlyph[], drop: Set<DrawnGlyph>, extra: Splice[] = []): Uint8Array {
+export function rewrite(bytes: Uint8Array, ops: Op[], glyphs: DrawnGlyph[], drop: Set<DrawnGlyph>, extra: Splice[] = []): Uint8Array {
   const byOp = new Map<number, DrawnGlyph[]>()
   for (const g of glyphs) {
     let l = byOp.get(g.op)
@@ -690,12 +769,10 @@ export function clipAllows(clip: Clip, r: { x: number; y: number; width: number;
  * `toPage` maps PDF user space to page space (pdf.js viewport at scale 1). Call before anything is
  * drawn on the page, after it has private Resources; then `commit` exactly once.
  */
-export function planRemoval(page: PDFPage, toPage: M, glyphTargets: GlyphTarget[], regions: RegionTarget[]): RemovalPlan {
+/** The page's content streams, decoded and joined (newline-separated), and tokenized. */
+export function pageContent(page: PDFPage): { bytes: Uint8Array; ops: Op[] } {
   const ctx = page.doc.context
-  const leaf = page.node
-  const res: RemovalResult = { glyphs: glyphTargets.map(() => false), regions: regions.map(() => true), reasons: [] }
-  if (!glyphTargets.length && !regions.length) return { result: res, anchorOf: () => undefined, commit: () => {} }
-  const contents = leaf.Contents()
+  const contents = page.node.Contents()
   const streams = contents instanceof PDFArray ? contents.asArray().map((r) => ctx.lookup(r)) : contents ? [contents] : []
   const parts = streams.filter((x): x is PDFStream => x instanceof PDFStream).map(decode)
   const bytes = new Uint8Array(parts.reduce((n, q) => n + q.length + 1, 0))
@@ -705,10 +782,72 @@ export function planRemoval(page: PDFPage, toPage: M, glyphTargets: GlyphTarget[
     off += q.length
     bytes[off++] = 10
   }
-  const ops = tokenize(bytes)
+  return { bytes, ops: tokenize(bytes) }
+}
+
+/**
+ * Writes a page's rewritten content: dropped glyphs removed, splices applied. Forms with dropped glyphs
+ * or splices of their own get a clone for this page under a new name (others may share them).
+ * /Contents becomes one stream in an array, wrapped in q…Q; pdf-lib's cached content stream is
+ * forgotten so later drawing appends a new one.
+ */
+export function writeContent(
+  page: PDFPage,
+  bytes: Uint8Array,
+  ops: Op[],
+  glyphs: DrawnGlyph[],
+  drop: Set<DrawnGlyph>,
+  forms: Forms,
+  pageExtra: Splice[],
+  formExtra: Map<number, Splice[]> = new Map(),
+) {
+  const ctx = page.doc.context
+  const leaf = page.node
+  const resources = leaf.Resources()
+  const enc = new TextEncoder()
+  const extra = pageExtra.slice()
+  for (const [doOp, f] of forms) {
+    const fg = glyphs.filter((g) => g.stream === doOp)
+    const fx = formExtra.get(doOp) ?? []
+    if (!fg.some((g) => drop.has(g)) && !fx.length) continue
+    const xobjects = resources?.lookupMaybe(N('XObject'), PDFDict)
+    if (!xobjects) continue
+    const newBytes = rewrite(f.bytes, f.ops, fg, drop, fx)
+    const dict = f.xo.dict.clone(ctx)
+    for (const k of ['Length', 'Filter', 'DecodeParms']) dict.delete(N(k))
+    const clone = ctx.flateStream(newBytes, Object.fromEntries([...dict.entries()].map(([k, v]) => [k.decodeText(), v])))
+    const name = `${f.name}E${doOp}`
+    xobjects.set(N(name), ctx.register(clone))
+    extra.push({ start: ops[doOp].start, end: ops[doOp].end, data: enc.encode(`/${name} Do`) })
+  }
+  const out = rewrite(
+    bytes,
+    ops,
+    glyphs.filter((g) => g.stream === 'page'),
+    drop,
+    extra,
+  )
+  // Keep /Contents an array (pdf-lib appends to it later) and isolate this content's graphics
+  // state from whatever gets appended after it.
+  const wrapped = new Uint8Array(out.length + 6)
+  wrapped.set(enc.encode('q\n'))
+  wrapped.set(out, 2)
+  wrapped.set(enc.encode('\nQ\n'), out.length + 2)
+  leaf.set(N('Contents'), ctx.obj([ctx.register(ctx.flateStream(wrapped))]))
+  const cached = page as unknown as { contentStream?: unknown; contentStreamRef?: unknown }
+  cached.contentStream = undefined
+  cached.contentStreamRef = undefined
+}
+
+export function planRemoval(page: PDFPage, toPage: M, glyphTargets: GlyphTarget[], regions: RegionTarget[]): RemovalPlan {
+  const ctx = page.doc.context
+  const leaf = page.node
+  const res: RemovalResult = { glyphs: glyphTargets.map(() => false), regions: regions.map(() => true), reasons: [] }
+  if (!glyphTargets.length && !regions.length) return { result: res, anchorOf: () => undefined, commit: () => {} }
+  const { bytes, ops } = pageContent(page)
   const resources = leaf.Resources()
   const glyphs: DrawnGlyph[] = []
-  const forms = new Map<number, { name: string; xo: PDFStream; ops: Op[]; bytes: Uint8Array }>()
+  const forms: Forms = new Map()
   interpret(ctx, ops, resources, toPage, 'page', glyphs, forms, false)
 
   const drop = new Set<DrawnGlyph>()
@@ -762,20 +901,6 @@ export function planRemoval(page: PDFPage, toPage: M, glyphTargets: GlyphTarget[
       if (!drop.size && !inserts.length) return
       const enc = new TextEncoder()
       const extra: Splice[] = []
-      // Forms that need edits: a clone for this page under a new name; the page's Do points to it.
-      for (const [doOp, f] of forms) {
-        const fg = glyphs.filter((g) => g.stream === doOp)
-        if (!fg.some((g) => drop.has(g))) continue
-        const xobjects = resources?.lookupMaybe(N('XObject'), PDFDict)
-        if (!xobjects) continue
-        const newBytes = rewrite(f.bytes, f.ops, fg, drop)
-        const dict = f.xo.dict.clone(ctx)
-        for (const k of ['Length', 'Filter', 'DecodeParms']) dict.delete(N(k))
-        const clone = ctx.flateStream(newBytes, Object.fromEntries([...dict.entries()].map(([k, v]) => [k.decodeText(), v])))
-        const name = `${f.name}E${doOp}`
-        xobjects.set(N(name), ctx.register(clone))
-        extra.push({ start: ops[doOp].start, end: ops[doOp].end, data: enc.encode(`/${name} Do`) })
-      }
       // New text in reading order: right after the text object (or form) it replaces. The content
       // there may run under another CTM: undo it so our default-user-space operators land right.
       for (const { anchor, bytes: b } of inserts) {
@@ -788,20 +913,7 @@ export function planRemoval(page: PDFPage, toPage: M, glyphTargets: GlyphTarget[
         data.set(tail, head.length + b.length)
         extra.push({ start: ops[anchor.op].end, end: ops[anchor.op].end, data })
       }
-      const out = rewrite(
-        bytes,
-        ops,
-        glyphs.filter((g) => g.stream === 'page'),
-        drop,
-        extra,
-      )
-      // Keep /Contents an array (pdf-lib appends to it later) and isolate this content's graphics
-      // state from whatever gets appended after it.
-      const wrapped = new Uint8Array(out.length + 6)
-      wrapped.set(enc.encode('q\n'))
-      wrapped.set(out, 2)
-      wrapped.set(enc.encode('\nQ\n'), out.length + 2)
-      leaf.set(N('Contents'), ctx.obj([ctx.register(ctx.flateStream(wrapped))]))
+      writeContent(page, bytes, ops, glyphs, drop, forms, extra)
     },
   }
 }
