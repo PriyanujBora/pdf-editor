@@ -52,6 +52,12 @@ export default defineConfig({
     alias: [
       { find: '@', replacement: path.resolve(import.meta.dirname, './src') },
       // pdf-lib's key derivation, needed to keep a PDF's original encryption (see keep-encryption.ts).
+      // The same standard-font metrics pdf-lib bundles internally (the public "standard-fonts" export
+      // is a second copy, +150 KB in the export worker).
+      {
+        find: /^@cantoo\/pdf-lib\/standard-fonts$/,
+        replacement: path.resolve(import.meta.dirname, './node_modules/@cantoo/pdf-lib/es/packages/standard-fonts/index.js'),
+      },
       {
         find: /^@cantoo\/pdf-lib\/crypto$/,
         replacement: path.resolve(import.meta.dirname, './node_modules/@cantoo/pdf-lib/es/core/crypto.js'),
@@ -78,6 +84,8 @@ export default defineConfig({
       'sonner',
       'lucide-react',
       '@cantoo/pdf-lib',
+      '@cantoo/pdf-lib/crypto',
+      '@cantoo/pdf-lib/standard-fonts',
       '@pdf-lib/fontkit',
       'regenerator-runtime/runtime',
     ],

@@ -9,7 +9,9 @@ import {
   PDFDocument,
   PDFHexString,
   PDFArray,
+  PDFContentStream,
   PDFDict,
+  PDFNumber,
   PDFName,
   PDFOperator,
   PDFOperatorNames,
@@ -30,20 +32,22 @@ import {
 import { FONT_FAMILIES, fontFileUrl, fontRuns, OBLIQUE_SHEAR } from '@/lib/fonts'
 import { encodeLine, usesOriginal, type OriginalFont } from '@/lib/original-font'
 import { alignOffset, baselineOffset, splitLines } from '@/lib/text-layout'
-import { layoutLine, type Measure } from '@/lib/text/line-layout'
+import { coversFor, layoutLine, type LineLayout, type Measure } from '@/lib/text/line-layout'
 import type { Cover, FontFamilyId, ImageElement, TextElement } from '@/types'
 import { collectGarbage, privateResources, pruneDeletedPages, rebuildPageTree } from './doc-structure'
 import { compatFontkit } from './fontkit-compat'
 import { applySourceEncryption, readEncryption } from './keep-encryption'
 import { elementFrame, invert, mul, pdfToPage, type Mat } from './matrix'
-import type { ExportRequest, ExportResponse } from './protocol'
+import type { ExportRequest, ExportResponse, RemovalNote } from './protocol'
+import { clipAllows, planRemoval, type Anchor, type GlyphTarget, type RegionTarget } from '@/lib/content/remove-text'
 
 declare const self: DedicatedWorkerGlobalScope
 
 self.onmessage = async (e: MessageEvent<ExportRequest>) => {
   try {
-    const bytes = await buildPdf(e.data)
-    self.postMessage({ type: 'done', bytes } satisfies ExportResponse, [bytes.buffer])
+    const notes: RemovalNote[] = []
+    const bytes = await buildPdf(e.data, notes)
+    self.postMessage({ type: 'done', bytes, notes } satisfies ExportResponse, [bytes.buffer])
   } catch (err) {
     self.postMessage({ type: 'error', message: err instanceof Error ? err.message : String(err) } satisfies ExportResponse)
   }
@@ -51,7 +55,7 @@ self.onmessage = async (e: MessageEvent<ExportRequest>) => {
 
 const progress = (value: number) => self.postMessage({ type: 'progress', value } satisfies ExportResponse)
 
-async function buildPdf(req: ExportRequest): Promise<Uint8Array> {
+async function buildPdf(req: ExportRequest, notes: RemovalNote[]): Promise<Uint8Array> {
   // Edit the source document itself (not copies of its pages in a new one) so forms, outlines,
   // named destinations, page labels, tags, metadata and attachments survive.
   const enc = req.keepEncryption ? await readEncryption(req.bytes, req.password) : null
@@ -100,7 +104,67 @@ async function buildPdf(req: ExportRequest): Promise<Uint8Array> {
     privateResources(doc, page)
 
     // page space → PDF user space
-    const toPdf = invert(pdfToPage(info.view, info.rotate))
+    const pageMat = pdfToPage(info.view, info.rotate)
+    const toPdf = invert(pageMat)
+
+    // Remove the old text from the content stream before drawing anything (Phase 3): glyphs edited
+    // lines no longer keep in place, the old OCR words under scan edits, older saves' patch areas.
+    const lines = new Map<string, Awaited<ReturnType<typeof layoutSourceLine>>>()
+    const glyphTargets: GlyphTarget[] = []
+    const owners: { el: string; gi: number }[] = []
+    const regions: RegionTarget[] = []
+    const regionOwners: string[] = []
+    for (const el of els) {
+      if (el.kind !== 'text') continue
+      if (el.source) {
+        const prep = await layoutSourceLine(el, fonts)
+        lines.set(el.id, prep)
+        for (const gi of prep.L.gone) {
+          const g = el.source.glyphs[gi]
+          glyphTargets.push({ x: g.x, y: el.source.baseline - el.source.runs[g.run].rise, code: g.code })
+          owners.push({ el: el.id, gi })
+        }
+      } else if (el.scan) {
+        const b = el.scan.lineBox
+        regions.push({ rect: { x: b.x - 1, y: b.y - 1, width: b.width + 2, height: b.height + 2 }, invisibleOnly: true })
+        regionOwners.push(el.id)
+      } else if (el.cover) {
+        regions.push({ rect: el.cover, invisibleOnly: false })
+        regionOwners.push(el.id)
+      }
+    }
+    const removed = new Map<string, Set<number>>()
+    const painted = new Set<string>()
+    if (glyphTargets.length || regions.length) {
+      const plan = planRemoval(page, [pageMat.a, pageMat.b, pageMat.c, pageMat.d, pageMat.e, pageMat.f], glyphTargets, regions)
+      const r = plan.result
+      const failed = new Map<string, string>()
+      r.glyphs.forEach((ok, ti) => {
+        const { el, gi } = owners[ti]
+        if (ok) {
+          let s = removed.get(el)
+          if (!s) removed.set(el, (s = new Set()))
+          s.add(gi)
+        } else failed.set(el, r.reasons[0] ?? 'unsupported content')
+      })
+      r.regions.forEach((ok, ri) => !ok && failed.set(regionOwners[ri], r.reasons[0] ?? 'unsupported content'))
+      for (const [elementId, reason] of failed) notes.push({ elementId, reason })
+      // New text goes where the old text was in the content (reading order, same tagged span), unless
+      // a clip there could cut it; otherwise it is appended at the end of the page as before.
+      const inserts: { anchor: Anchor; bytes: Uint8Array }[] = []
+      for (const el of els) {
+        if (el.kind !== 'text' || !el.source) continue
+        const prep = lines.get(el.id)
+        if (!prep?.L.changed) continue
+        const ti = owners.findIndex((o) => o.el === el.id && r.glyphs[owners.indexOf(o)])
+        const anchor = ti >= 0 ? plan.anchorOf(ti) : undefined
+        if (!anchor || !clipAllows(anchor.clip, prep.L.bounds)) continue
+        const src = removed.get(el.id) ?? new Set<number>()
+        inserts.push({ anchor, bytes: record(page, () => paintSourceLine(page, toPdf, el, prep, fonts, originals, src)) })
+        painted.add(el.id)
+      }
+      plan.commit(inserts)
+    }
 
     // Covers first so no replacement text is hidden by another cover.
     // Scan-matched edits are part of the page image: draw them first, with an
@@ -123,7 +187,8 @@ async function buildPdf(req: ExportRequest): Promise<Uint8Array> {
     for (const el of els) {
       if (el.kind === 'text' && el.scan) continue
       if (el.kind === 'text' && el.source) {
-        await drawSourceLine(page, toPdf, el, fonts, originals)
+        const prep = lines.get(el.id)
+        if (prep && !painted.has(el.id)) paintSourceLine(page, toPdf, el, prep, fonts, originals, removed.get(el.id) ?? new Set())
         continue
       }
       if (el.kind === 'text') {
@@ -159,9 +224,28 @@ function hexToRgb(hex: string) {
 }
 
 function drawCover(page: PDFPage, toPdf: Mat, c: Cover) {
+  // Plain operators (not drawRectangle) so recorded drawing (see `record`) captures them too.
+  const col = hexToRgb(c.color)
   withFrame(page, mul(toPdf, elementFrame(c.x, c.y, 0)), () => {
-    page.drawRectangle({ x: 0, y: -c.height, width: c.width, height: c.height, color: hexToRgb(c.color), borderWidth: 0 })
+    page.pushOperators(
+      setFillingRgbColor(col.red, col.green, col.blue),
+      PDFOperator.of(PDFOperatorNames.AppendRectangle, [0, -c.height, c.width, c.height].map((v) => PDFNumber.of(v))),
+      PDFOperator.of(PDFOperatorNames.FillNonZero),
+    )
   })
+}
+
+/** Runs `draw` with the page's operators captured instead of appended (for in-place insertion). */
+function record(page: PDFPage, draw: () => void): Uint8Array {
+  const ops: PDFOperator[] = []
+  const orig = page.pushOperators.bind(page)
+  page.pushOperators = (...o: PDFOperator[]) => void ops.push(...o)
+  try {
+    draw()
+  } finally {
+    page.pushOperators = orig
+  }
+  return PDFContentStream.of(page.doc.context.obj({}), ops, false).getUnencodedContents()
 }
 
 async function drawImage(
@@ -455,7 +539,8 @@ function drawOriginalText(page: PDFPage, toPdf: Mat, el: TextElement, originals:
  * dictionary and the same codes, new characters with the PDF font where it has them, otherwise the
  * metric-compatible stand-in, glyph by glyph.
  */
-async function drawSourceLine(page: PDFPage, toPdf: Mat, el: TextElement, fonts: FontCache, originals: OriginalFonts) {
+/** Layout of an edited line with its stand-in fonts loaded (measuring must be synchronous). */
+async function layoutSourceLine(el: TextElement, fonts: FontCache): Promise<{ L: LineLayout; fontOf: (f: FontFamilyId, b: boolean, i: boolean) => PDFFont | undefined }> {
   const src = el.source!
   // Stand-in fonts the layout may use, loaded up front so measuring is synchronous.
   const loaded = new Map<string, PDFFont>()
@@ -473,9 +558,22 @@ async function drawSourceLine(page: PDFPage, toPdf: Mat, el: TextElement, fonts:
     if (emb?.font?.layout) return emb.font.layout(text, emb.fontFeatures).positions.reduce((s, p) => s + p.xAdvance, 0) / emb.font.unitsPerEm
     return font.widthOfTextAtSize(text, 1)
   }
-  const L = layoutLine(el, measure)
+  return { L: layoutLine(el, measure), fontOf }
+}
+
+function paintSourceLine(
+  page: PDFPage,
+  toPdf: Mat,
+  el: TextElement,
+  { L, fontOf }: Awaited<ReturnType<typeof layoutSourceLine>>,
+  fonts: FontCache,
+  originals: OriginalFonts,
+  removed: Set<number>,
+) {
+  const src = el.source!
   if (!L.changed) return
-  for (const c of L.covers) drawCover(page, toPdf, { ...c, color: src.background, original: '' })
+  // Patches only where the old glyph could not be removed from the content stream.
+  for (const c of coversFor(src, L.gone.filter((gi) => !removed.has(gi)))) drawCover(page, toPdf, { ...c, color: src.background, original: '' })
 
   const ctx = page.doc.context
   withFrame(page, mul(toPdf, elementFrame(0, 0, 0)), () => {

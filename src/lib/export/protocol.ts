@@ -15,5 +15,11 @@ export interface ExportRequest {
   baseUrl: string
 }
 
+/** An edit whose old text could not be removed from the file (it stays, covered by a patch). */
+export interface RemovalNote {
+  elementId: string
+  reason: string
+}
+
 export type ExportResponse =
-  { type: 'progress'; value: number } | { type: 'done'; bytes: Uint8Array } | { type: 'error'; message: string }
+  { type: 'progress'; value: number } | { type: 'done'; bytes: Uint8Array; notes: RemovalNote[] } | { type: 'error'; message: string }

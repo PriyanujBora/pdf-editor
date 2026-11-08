@@ -57,6 +57,24 @@ export interface LineLayout {
   bounds: PtRect
   /** Characters drawn with a stand-in although the line has its own (embedded) font. */
   fallbackChars: string[]
+  /** Printed ink glyphs that don't stay in place: the export removes them from the content stream. */
+  gone: number[]
+}
+
+/** Patches over printed glyphs (merged where they touch). Editor: all gone glyphs; export: only
+ *  those the content-stream editor couldn't remove. */
+export function coversFor(src: NonNullable<TextElement['source']>, glyphs: number[]): PtRect[] {
+  const covers: PtRect[] = []
+  const pad = 0.25
+  const top = src.coverTop ?? src.box.y - pad
+  const bottom = src.coverBottom ?? src.box.y + src.box.height + pad
+  for (const g of glyphs.map((i) => src.glyphs[i]).sort((p, q) => p.x - q.x)) {
+    const r = { x: g.x - pad, y: top, width: g.adv + 2 * pad, height: bottom - top }
+    const last = covers[covers.length - 1]
+    if (last && r.x <= last.x + last.width + 0.6) last.width = Math.max(last.width, r.x + r.width - last.x)
+    else covers.push(r)
+  }
+  return covers
 }
 
 interface Tok {
@@ -323,19 +341,10 @@ export function layoutLine(el: TextElement, measure: Measure): LineLayout {
   carets.length = text.length + 1
   const caretsOut = carets.map((c) => c + dx)
 
-  // Every printed ink glyph that isn't kept in place gets a patch.
-  const covers: PtRect[] = []
-  const pad = 0.25
-  const gone = G.filter((g, i) => !kept.has(i) && g.uni.trim()).sort((p, q) => p.x - q.x)
-  for (const g of gone) {
-    changed = true
-    const top = src.coverTop ?? src.box.y - pad
-    const bottom = src.coverBottom ?? src.box.y + src.box.height + pad
-    const r = { x: g.x - pad, y: top, width: g.adv + 2 * pad, height: bottom - top }
-    const last = covers[covers.length - 1]
-    if (last && r.x <= last.x + last.width + 0.6) last.width = Math.max(last.width, r.x + r.width - last.x)
-    else covers.push(r)
-  }
+  // Every printed ink glyph that isn't kept in place gets removed (export) or patched over.
+  const gone = G.map((_, i) => i).filter((i) => !kept.has(i) && G[i].uni.trim())
+  if (gone.length) changed = true
+  const covers = coversFor(src, gone)
 
   const x0 = Math.min(src.box.x, (n ? nextInk(0) : src.box.x) + dx)
   const x1 = Math.max(src.box.x + src.box.width, pen + dx)
@@ -348,6 +357,7 @@ export function layoutLine(el: TextElement, measure: Measure): LineLayout {
     bottom: src.box.y + src.box.height + dy,
     bounds: { x: x0, y: Math.min(src.box.y, src.box.y + dy), width: x1 - x0, height: src.box.height + Math.abs(dy) },
     fallbackChars: [...fallbackChars],
+    gone,
   }
 }
 
