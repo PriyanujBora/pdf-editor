@@ -29,7 +29,7 @@ import { useDoc } from '@/store/document'
 import { useSession } from '@/store/session'
 import { useUi } from '@/store/ui'
 import type { EditorElement, FontFamilyId, ImageElement, TextAlign, TextElement } from '@/types'
-import { deleteSelected } from './actions'
+import { deleteSelected, editParagraphLine, shrinkToFit } from './actions'
 import { TOOLS } from './tools'
 import { RedactPanel } from './RedactPanel'
 
@@ -75,10 +75,12 @@ function TextProps({ el }: { el: TextElement }) {
   const f = FONT_FAMILIES[el.font]
   const src = el.source
   const notRemoved = useSession((s) => s.notRemoved[el.id])
+  const layout = src ? layoutLine(el, measureCanvas) : null
+  const textSel = useUi((s) => (s.editingId === el.id || s.selectedId === el.id ? s.textSel : null))
   const missing = src
     ? el.override
       ? []
-      : layoutLine(el, measureCanvas).fallbackChars
+      : layout!.fallbackChars
     : el.original && el.useOriginal
       ? missingGlyphs(el.text, el.original)
       : []
@@ -277,8 +279,48 @@ function TextProps({ el }: { el: TextElement }) {
 
       {src && (
         <div className="rounded-xl border border-dashed p-3 text-sm" data-testid="source-edit">
-          <p className="text-xs font-medium text-muted-foreground">Edits printed text</p>
+          <p className="text-xs font-medium text-muted-foreground">
+            {src.para
+              ? `Edits a printed paragraph · ${src.para.lines.length} lines, ${{ left: 'left-aligned', right: 'right-aligned', center: 'centred', justify: 'justified' }[src.para.align]}`
+              : 'Edits printed text'}
+          </p>
           <p className="mt-1 line-clamp-2 break-words">{src.text}</p>
+          {src.para && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              The text reflows within the paragraph’s column. Alt-click a line on the page to edit just that line.
+            </p>
+          )}
+          {layout?.overflow && (
+            <div className="mt-2 rounded-lg bg-orange-500/10 p-2 text-xs text-orange-700 dark:text-orange-300" role="alert" data-testid="para-overflow">
+              The paragraph now needs {(layout.lines ?? 0) - (src.para?.lines.length ?? 0)} more{' '}
+              {(layout.lines ?? 0) - (src.para?.lines.length ?? 0) === 1 ? 'line' : 'lines'} than printed and may overlap what’s
+              below (outlined on the page).
+              <Button variant="outline" className="mt-2 h-10 w-full lg:h-8" onClick={() => shrinkToFit(el)} data-testid="shrink-to-fit">
+                Shrink to fit
+              </Button>
+            </div>
+          )}
+          {src.para && (el.paraScale ?? 1) < 1 && (
+            <Button variant="ghost" className="mt-2 h-10 w-full justify-start lg:h-8" onClick={() => update(el.id, { paraScale: undefined })}>
+              Text shrunk to {Math.round((el.paraScale ?? 1) * 100)} % — reset size
+            </Button>
+          )}
+          {src.para && el.text === src.text && (
+            <Button
+              variant="ghost"
+              className="mt-2 h-10 w-full justify-start lg:h-8"
+              data-testid="edit-line-only"
+              onClick={() => {
+                const i = textSel?.[0] ?? 0
+                const starts = src.para!.starts
+                let k = 0
+                while (k + 1 < starts.length && starts[k + 1].char <= i) k++
+                editParagraphLine(el, k)
+              }}
+            >
+              Edit this line only
+            </Button>
+          )}
           <p className="mt-2 text-xs text-muted-foreground">
             Words you didn’t change keep the PDF’s own letters and positions. When you download, the old words are removed
             from the file, so searching or copying won’t find them.

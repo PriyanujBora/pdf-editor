@@ -84,7 +84,10 @@ for (const file of files) {
     })
   const clickLine = async (r, at = 0.5) => {
     await page.evaluate(() => window.__ui.getState().set({ selectedId: null, editingId: null }))
+    // Alt-click: this harness measures line edits (a plain click edits the whole paragraph).
+    await page.keyboard.down('Alt')
     await page.mouse.click(r.x + Math.max(2, r.w * at), r.y + r.h / 2)
+    await page.keyboard.up('Alt')
     await page.waitForSelector(TA, { timeout: 8000 })
   }
 

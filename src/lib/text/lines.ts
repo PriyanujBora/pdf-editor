@@ -262,6 +262,11 @@ export function buildLines(
     let x0 = Infinity
     let x1 = -Infinity
     const base = median(visible.map((g) => g.base))
+    // Glyphs drawn off the baseline (vertically positioned marks) remember their offset.
+    for (let k = 0; k < outGlyphs.length; k++) {
+      const d = line[k].base - base
+      if (Math.abs(d) > 0.05) outGlyphs[k].dy = d
+    }
     for (const g of line) {
       const f = fonts.get(g.font)
       const asc = f?.ascent ?? 0.8

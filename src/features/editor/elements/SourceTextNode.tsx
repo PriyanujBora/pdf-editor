@@ -3,6 +3,7 @@ import { Shape } from 'react-konva'
 import type Konva from 'konva'
 import { cssFont, ensureFontLoaded } from '@/lib/fonts'
 import { layoutLine, type LineLayout } from '@/lib/text/line-layout'
+import { lineOfGlyph } from '@/lib/text/para-layout'
 import { clearMeasureCache, measureCanvas } from '@/lib/text/measure-canvas'
 import { useUi } from '@/store/ui'
 import type { TextElement } from '@/types'
@@ -22,6 +23,7 @@ interface Props extends NodeHandlers {
 
 const CARET = 'oklch(0.56 0.22 268)'
 const SELECTION = 'rgba(99,102,241,0.28)'
+const OVERFLOW = '#ea580c'
 
 /**
  * An edited existing line (`el.source`). Draws only what differs from the page: patches over
@@ -52,7 +54,7 @@ export const SourceTextNode = memo(function SourceTextNode({ el, pageId, pageRot
   const layout = useMemo(
     () => layoutLine(el, measureCanvas),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [el.text, el.x, el.y, el.override, el.font, el.size, el.bold, el.italic, el.color, src, fontTick],
+    [el.text, el.x, el.y, el.override, el.font, el.size, el.bold, el.italic, el.color, el.paraScale, src, fontTick],
   )
   useEffect(() => onLayout?.(layout), [layout, onLayout])
 
@@ -80,23 +82,25 @@ export const SourceTextNode = memo(function SourceTextNode({ el, pageId, pageRot
         for (const d of layout.draws) {
           if (d.kind === 'glyph') {
             const run = src.runs[d.run]
+            const k = d.scale ?? 1
             c.fillStyle = run.color
             if (run.embedded) {
               c.save()
               c.translate(d.x, d.y)
               c.scale(run.hScale, 1)
-              c.font = `${run.size}px "${run.loadedName}"`
+              c.font = `${run.size * k}px "${run.loadedName}"`
               c.textBaseline = 'alphabetic'
               c.fillText(d.fontChar, 0, 0)
               c.restore()
             } else if (d.moved !== undefined && rendered && pageRotation === 0) {
               // No FontFace (Type3 / not embedded): copy the glyph as printed from the page render.
               const g = src.glyphs[d.moved]
-              const k = rendered.scale
-              const top = src.box.y
-              c.drawImage(rendered.canvas, g.x * k, top * k, g.adv * k, src.box.height * k, d.x, d.y + run.rise - (src.baseline - top), g.adv, src.box.height)
+              const line = lineOfGlyph(src, d.moved)
+              const r = rendered.scale
+              const top = line.box.y
+              c.drawImage(rendered.canvas, g.x * r, top * r, g.adv * r, line.box.height * r, d.x, d.y + run.rise * k - (line.baseline - top) * k, g.adv * k, line.box.height * k)
             } else {
-              c.font = cssFont(run.family, run.size * run.familyScale, run.bold, run.italic)
+              c.font = cssFont(run.family, run.size * run.familyScale * k, run.bold, run.italic)
               c.fillText(d.uni, d.x, d.y)
             }
           } else {
@@ -110,17 +114,39 @@ export const SourceTextNode = memo(function SourceTextNode({ el, pageId, pageRot
             c.restore()
           }
         }
+        const px = 1 / (shape.getAbsoluteScale().x || 1)
+        // Paragraph text that now runs past the printed lines: outlined so it never covers
+        // what's below unnoticed (the panel offers Shrink to fit).
+        if (layout.overflow && (selected || editing)) {
+          const o = layout.overflow
+          c.strokeStyle = OVERFLOW
+          c.lineWidth = 1.5 * px
+          c.setLineDash([5 * px, 3 * px])
+          c.strokeRect(o.x - 2, o.y, o.width + 4, o.height + 2)
+          c.setLineDash([])
+        }
         if (editing && sel) {
-          const px = 1 / (shape.getAbsoluteScale().x || 1)
+          const band = (i: number) => layout.caretBands?.[i] ?? { top: layout.top, bottom: layout.bottom }
           const [s0, s1] = sel
           if (s0 === s1) {
             c.fillStyle = CARET
-            c.fillRect((layout.carets[s0] ?? layout.carets.at(-1)!) - px * 0.75, layout.top, px * 1.5, layout.bottom - layout.top)
+            const b2 = band(Math.min(s0, layout.carets.length - 1))
+            c.fillRect((layout.carets[s0] ?? layout.carets.at(-1)!) - px * 0.75, b2.top, px * 1.5, b2.bottom - b2.top)
           } else {
             c.fillStyle = SELECTION
-            const x0 = layout.carets[Math.min(s0, s1)] ?? 0
-            const x1 = layout.carets[Math.max(s0, s1)] ?? 0
-            c.fillRect(x0, layout.top, x1 - x0, layout.bottom - layout.top)
+            // One highlight per line the selection touches.
+            const lo = Math.min(s0, s1)
+            const hi = Math.max(s0, s1)
+            let i = lo
+            while (i < hi) {
+              const b2 = band(i)
+              let j = i
+              while (j + 1 <= hi && band(j + 1).top === b2.top) j++
+              const x0 = layout.carets[i] ?? 0
+              const x1 = layout.carets[j] ?? 0
+              c.fillRect(Math.min(x0, x1), b2.top, Math.abs(x1 - x0) || px, b2.bottom - b2.top)
+              i = j + 1
+            }
           }
         }
         c.restore()

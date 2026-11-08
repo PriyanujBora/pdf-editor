@@ -8,6 +8,8 @@ import { uid } from '@/lib/ids'
 import { sampleColors } from '@/lib/pdf/sample'
 import { originalFontFor, refreshOriginal, scanDocumentInBackground } from '@/lib/pdf/font-scan'
 import { caretAt, layoutLine } from '@/lib/text/line-layout'
+import { mergeLines, mergeRow } from '@/lib/text/para-layout'
+import { paragraphOf } from '@/lib/text/paragraphs'
 import { measureCanvas } from '@/lib/text/measure-canvas'
 import { fitScanLine } from '@/lib/scan/fit'
 import type { TextBlock } from '@/lib/pdf/text-blocks'
@@ -120,10 +122,17 @@ async function editScanBlock(page: PageItem, block: TextBlock) {
 }
 
 /** Turns a detected line of existing text into an editable replacement. */
-export function editTextBlock(page: PageItem, block: TextBlock, at?: { x: number; y: number }, all: TextBlock[] = []) {
+/**
+ * Edits an existing line — or, by default, the whole paragraph it belongs to (Phase 5);
+ * `lineOnly` (Alt-click, or "Edit this line only") edits just the line.
+ */
+export function editTextBlock(page: PageItem, block: TextBlock, at?: { x: number; y: number }, all: TextBlock[] = [], opts: { lineOnly?: boolean } = {}) {
   if (block.ocr) void editScanBlock(page, block)
-  else if (block.source) editSourceLine(page, block, at, all)
-  else editVectorBlock(page, block)
+  else if (block.source) {
+    const para = opts.lineOnly ? null : paragraphOf(all, all.indexOf(block))
+    if (para) editSourcePara(page, para.members.map((row) => row.map((i) => all[i])), para, at, all)
+    else editSourceLine(page, block, at, all)
+  } else editVectorBlock(page, block)
 }
 
 // --- Edit sessions -------------------------------------------------------------
@@ -184,7 +193,8 @@ function sampleBackground(page: PageItem, r: PtRect): { background: string; ink:
 }
 
 /** Edit an existing vector line: nothing changes on the page until the text does. */
-function editSourceLine(page: PageItem, block: TextBlock, at: { x: number; y: number } | undefined, all: TextBlock[]) {
+/** A detected line made ready for editing: patch bands, page colour, fonts, flattened opacity. */
+function prepareLine(page: PageItem, block: TextBlock, all: TextBlock[]) {
   const line = block.source!
   // Where boxes of neighbouring lines overlap, split the band where the ink is: descenders reach
   // ~0.23 em below a baseline, ascenders ~0.76 em above one. Patches stay on this line's side.
@@ -225,14 +235,28 @@ function editSourceLine(page: PageItem, block: TextBlock, at: { x: number; y: nu
   const runs = line.runs.map((r) => ({ ...r, color: flat(r.color, r.alpha), alpha: 1 }))
   const { size, family, bold, italic, ...rest } = { ...line, runs }
   const color = runs.find((r) => r.color)?.color ?? line.color
+  return { source: { ...rest, background, fonts, coverTop, coverBottom } as NonNullable<TextElement['source']>, size, family, bold, italic, color }
+}
+
+function startSourceEdit(el: TextElement, at: { x: number; y: number } | undefined) {
+  const caret = at ? caretAt(layoutLine(el, measureCanvas), at.x, at.y) : el.text.length
+  beginEditSession(el.id)
+  useDoc.getState().addElement(el)
+  useUi.getState().set({ selectedId: el.id, editingId: el.id, caret })
+  const pdf = useSession.getState().pdf
+  if (pdf) scanDocumentInBackground(pdf)
+}
+
+function editSourceLine(page: PageItem, block: TextBlock, at: { x: number; y: number } | undefined, all: TextBlock[]) {
+  const { source, size, family, bold, italic, color } = prepareLine(page, block, all)
   const el: TextElement = {
     id: uid('t_'),
     kind: 'text',
     pageId: page.id,
-    x: line.box.x,
-    y: line.box.y,
+    x: source.box.x,
+    y: source.box.y,
     rotation: 0,
-    text: line.text,
+    text: source.text,
     font: family,
     size: Math.round(size * 100) / 100,
     color,
@@ -240,14 +264,85 @@ function editSourceLine(page: PageItem, block: TextBlock, at: { x: number; y: nu
     italic,
     align: 'left',
     lineHeight: 1.2,
-    source: { ...rest, background, fonts, coverTop, coverBottom },
+    source,
   }
-  const caret = at ? caretAt(layoutLine(el, measureCanvas), at.x) : el.text.length
-  beginEditSession(el.id)
-  useDoc.getState().addElement(el)
-  useUi.getState().set({ selectedId: el.id, editingId: el.id, caret })
-  const pdf = useSession.getState().pdf
-  if (pdf) scanDocumentInBackground(pdf)
+  startSourceEdit(el, at)
+}
+
+/** "Shrink to fit": the largest text scale (≥ 50 %) at which the paragraph fits its printed lines. */
+export function shrinkToFit(el: TextElement) {
+  const n = el.source?.para?.lines.length
+  if (!n) return
+  const fits = (k: number) => (layoutLine({ ...el, paraScale: k }, measureCanvas).lines ?? n) <= n
+  if (!fits(0.5)) {
+    toast('This paragraph doesn’t fit even at half size', { description: 'Shorten the text, or let it run on.' })
+    return
+  }
+  let lo = 0.5
+  let hi = 1
+  for (let i = 0; i < 12; i++) {
+    const mid = (lo + hi) / 2
+    if (fits(mid)) lo = mid
+    else hi = mid
+  }
+  useDoc.getState().updateElement(el.id, { paraScale: Math.floor(lo * 1000) / 1000 }, { merge: false })
+}
+
+/** Switch an unchanged paragraph edit to editing one of its lines only. */
+export function editParagraphLine(el: TextElement, k: number) {
+  const line = el.source?.para?.lines[k]
+  if (!line) return
+  useUi.getState().set({ editingId: null })
+  endEditSession(el.id)
+  if (useDoc.getState().elements[el.id]) useDoc.getState().removeElement(el.id)
+  const run = line.runs[0]
+  const next: TextElement = {
+    ...el,
+    id: uid('t_'),
+    x: line.box.x,
+    y: line.box.y,
+    text: line.text,
+    size: Math.round((run?.size ?? el.size) * 100) / 100,
+    lineHeight: 1.2,
+    align: 'left',
+    paraScale: undefined,
+    source: line,
+  }
+  startSourceEdit(next, undefined)
+}
+
+/** Edit a whole printed paragraph: its lines merged into one source (see lib/text/para-layout.ts). */
+function editSourcePara(
+  page: PageItem,
+  rows: TextBlock[][],
+  info: { align: TextElement['align'] | 'justify'; left: number; right: number; firstLeft: number; leading: number },
+  at: { x: number; y: number } | undefined,
+  all: TextBlock[],
+) {
+  const prepared = rows.map((row) => row.map((b) => prepareLine(page, b, all)))
+  const source = mergeLines(
+    prepared.map((row) => mergeRow(row.map((p) => p.source))),
+    { align: info.align, left: info.left, right: info.right, firstLeft: info.firstLeft, leading: info.leading },
+  )
+  const main = prepared[0][0]
+  const el: TextElement = {
+    id: uid('t_'),
+    kind: 'text',
+    pageId: page.id,
+    x: source.box.x,
+    y: source.box.y,
+    rotation: 0,
+    text: source.text,
+    font: main.family,
+    size: Math.round(main.size * 100) / 100,
+    color: main.color,
+    bold: main.bold,
+    italic: main.italic,
+    align: info.align === 'justify' ? 'left' : info.align,
+    lineHeight: Math.round((info.leading / main.size) * 100) / 100,
+    source,
+  }
+  startSourceEdit(el, at)
 }
 
 /** Replacement drawn on top: background-coloured cover + new text. */

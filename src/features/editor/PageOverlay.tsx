@@ -150,7 +150,7 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
 
   const selectedEl = elements.find((e) => e.id === selectedId)
 
-  const onBlockTap = (b: TextBlock, touch: boolean) => {
+  const onBlockTap = (b: TextBlock, touch: boolean, lineOnly = false) => {
     const ui = useUi.getState()
     // In Select mode the first tap away from a selection just deselects.
     if (ui.tool === 'select' && (ui.selectedId || ui.editingId)) {
@@ -158,7 +158,7 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
       return
     }
     if (touch) primeKeyboard()
-    editTextBlock(page, b, groupRef.current?.getRelativePointerPosition() ?? undefined, blocks ?? [])
+    editTextBlock(page, b, groupRef.current?.getRelativePointerPosition() ?? undefined, blocks ?? [], { lineOnly })
   }
 
   const onStageTap = (e: KEvt) => {
@@ -243,7 +243,7 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
         primeKeyboard()
         const L = layouts.current.get(el.id)
         const pos = groupRef.current?.getRelativePointerPosition()
-        if (el.kind === 'text' && el.source && L && pos) ui.set({ caret: caretAt(L, pos.x) })
+        if (el.kind === 'text' && el.source && L && pos) ui.set({ caret: caretAt(L, pos.x, pos.y) })
         ui.startEditing(el.id)
       } else select()
     }
@@ -258,7 +258,7 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
       const stage = e.target.getStage()
       const at = () => {
         const pos = groupRef.current?.getRelativePointerPosition()
-        return pos ? caretAt(L, pos.x) : input.selectionStart
+        return pos ? caretAt(L, pos.x, pos.y) : input.selectionStart
       }
       const anchor = 'shiftKey' in e.evt && e.evt.shiftKey ? input.selectionStart : at()
       const set = (i: number) => {
@@ -303,8 +303,8 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
           const v = input.value
           let a = input.selectionStart
           let b = a
-          while (a > 0 && /S/.test(v[a - 1])) a--
-          while (b < v.length && /S/.test(v[b])) b++
+          while (a > 0 && /\S/.test(v[a - 1])) a--
+          while (b < v.length && /\S/.test(v[b])) b++
           input.setSelectionRange(a, b)
           ui.set({ textSel: [a, b] })
           return
@@ -386,7 +386,8 @@ export function PageOverlay({ page, width, height, zoom }: Props) {
               }}
               onClick={(e) => {
                 e.cancelBubble = true
-                onBlockTap(b, false)
+                // Alt-click edits just this line instead of its paragraph.
+                onBlockTap(b, false, e.evt.altKey)
               }}
               onTap={(e) => {
                 e.cancelBubble = true

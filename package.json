@@ -20,7 +20,8 @@
     "test:edit-stability": "node tests/edit-stability.mjs",
     "corpus:word": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/corpus-word.ps1",
     "test:fidelity": "node tests/fidelity.mjs",
-    "test:redaction": "node tests/redaction.mjs"
+    "test:redaction": "node tests/redaction.mjs",
+    "test:paragraphs": "node tests/paragraphs.mjs"
   },
   "dependencies": {
     "@cantoo/pdf-lib": "^2.11.1",

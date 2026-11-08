@@ -1,4 +1,5 @@
 import type { FontFamilyId, PtRect, SourceRun, TextElement } from '@/types'
+import { layoutParagraph, lineOfGlyph } from './para-layout'
 
 /**
  * Lays out an edited existing line (`TextElement.source`). Shared by the editor canvas and the
@@ -31,6 +32,8 @@ export type LineDraw =
       y: number
       /** Index of the source glyph when this is an original glyph that moved. */
       moved?: number
+      /** Paragraph "Shrink to fit": the run's size times this. */
+      scale?: number
     }
   | {
       kind: 'text'
@@ -59,6 +62,16 @@ export interface LineLayout {
   fallbackChars: string[]
   /** Printed ink glyphs that don't stay in place: the export removes them from the content stream. */
   gone: number[]
+  /** Paragraphs: vertical band of each caret's line (else `top`/`bottom` for all). */
+  caretBands?: { top: number; bottom: number }[]
+  /** Paragraphs: number of lines after layout, and the area below the printed lines it now needs. */
+  lines?: number
+  overflow?: PtRect | null
+}
+
+/** Lays out an edited line or paragraph (`el.source.para`). */
+export function layoutLine(el: TextElement, measure: Measure): LineLayout {
+  return el.source?.para ? layoutParagraph(el, measure) : layoutSingleLine(el, measure)
 }
 
 /** Patches over printed glyphs (merged where they touch). Editor: all gone glyphs; export: only
@@ -66,12 +79,14 @@ export interface LineLayout {
 export function coversFor(src: NonNullable<TextElement['source']>, glyphs: number[]): PtRect[] {
   const covers: PtRect[] = []
   const pad = 0.25
-  const top = src.coverTop ?? src.box.y - pad
-  const bottom = src.coverBottom ?? src.box.y + src.box.height + pad
-  for (const g of glyphs.map((i) => src.glyphs[i]).sort((p, q) => p.x - q.x)) {
+  // Paragraphs: each glyph is patched within its own printed line's band.
+  const items = glyphs.map((i) => ({ g: src.glyphs[i], line: lineOfGlyph(src, i) })).sort((p, q) => p.line.baseline - q.line.baseline || p.g.x - q.g.x)
+  for (const { g, line } of items) {
+    const top = line.coverTop ?? line.box.y - pad
+    const bottom = line.coverBottom ?? line.box.y + line.box.height + pad
     const r = { x: g.x - pad, y: top, width: g.adv + 2 * pad, height: bottom - top }
     const last = covers[covers.length - 1]
-    if (last && r.x <= last.x + last.width + 0.6) last.width = Math.max(last.width, r.x + r.width - last.x)
+    if (last && Math.abs(last.y - r.y) < 0.01 && r.x <= last.x + last.width + 0.6) last.width = Math.max(last.width, r.x + r.width - last.x)
     else covers.push(r)
   }
   return covers
@@ -122,7 +137,7 @@ type Piece =
   | { kind: 'src'; from: number; to: number; shift: number; space: boolean }
   | { kind: 'fresh'; x: number; draws: LineDraw[]; carets: number[]; spaces: number }
 
-export function layoutLine(el: TextElement, measure: Measure): LineLayout {
+export function layoutSingleLine(el: TextElement, measure: Measure): LineLayout {
   const src = el.source!
   const dx = el.x - src.box.x
   const dy = el.y - src.box.y
@@ -333,7 +348,7 @@ export function layoutLine(el: TextElement, measure: Measure): LineLayout {
       const g = G[gi]
       if (!g.uni.trim()) continue
       const run = src.runs[g.run]
-      draws.push({ kind: 'glyph', run: g.run, code: g.code, fontChar: g.fontChar, uni: g.uni, x: g.x + total, y: src.baseline + dy - run.rise, moved: gi })
+      draws.push({ kind: 'glyph', run: g.run, code: g.code, fontChar: g.fontChar, uni: g.uni, x: g.x + total, y: src.baseline + dy - run.rise + (g.dy ?? 0), moved: gi })
     }
   }
   carets.push(pen)
@@ -361,9 +376,38 @@ export function layoutLine(el: TextElement, measure: Measure): LineLayout {
   }
 }
 
-/** Caret index nearest to page-space x. */
-export function caretAt(layout: LineLayout, x: number): number {
-  let best = 0
-  for (let i = 1; i < layout.carets.length; i++) if (Math.abs(layout.carets[i] - x) < Math.abs(layout.carets[best] - x)) best = i
-  return best
+/** Caret index nearest to a page-space point (paragraphs: on the line under `y`). */
+export function caretAt(layout: LineLayout, x: number, y?: number): number {
+  const bands = layout.caretBands
+  // The line whose band is nearest to y.
+  let lineTop: number | undefined
+  if (bands && y !== undefined) {
+    let bestD = Infinity
+    for (const b of bands) {
+      const d = y < b.top ? b.top - y : y > b.bottom ? y - b.bottom : 0
+      if (d < bestD - 1e-6) {
+        bestD = d
+        lineTop = b.top
+      }
+    }
+  }
+  let best = -1
+  for (let i = 0; i < layout.carets.length; i++) {
+    if (lineTop !== undefined && bands && Math.abs(bands[i].top - lineTop) > 1e-6) continue
+    if (best < 0 || Math.abs(layout.carets[i] - x) < Math.abs(layout.carets[best] - x)) best = i
+  }
+  return Math.max(0, best)
+}
+
+/** Paragraphs: the caret on the line above / below (same x), for arrow keys. */
+export function caretVertical(layout: LineLayout, from: number, dir: -1 | 1): number | null {
+  const bands = layout.caretBands
+  if (!bands) return null
+  const b = bands[from]
+  const others = [...new Set(bands.map((x) => x.top))].sort((p, q) => p - q)
+  const i = others.findIndex((t) => Math.abs(t - b.top) < 1e-6)
+  const target = others[i + dir]
+  if (target === undefined) return null
+  const band = bands.find((x) => Math.abs(x.top - target) < 1e-6)!
+  return caretAt(layout, layout.carets[from], (band.top + band.bottom) / 2)
 }

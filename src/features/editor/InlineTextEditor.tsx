@@ -3,7 +3,7 @@ import { FONT_FAMILIES, cssFont, ensureFontLoaded } from '@/lib/fonts'
 import { measureText } from '@/lib/measure'
 import { ASCENT } from '@/lib/text-layout'
 import { mul, rotate, scale, translate, userRotation } from '@/lib/export/matrix'
-import { layoutLine } from '@/lib/text/line-layout'
+import { caretVertical, layoutLine } from '@/lib/text/line-layout'
 import { measureCanvas } from '@/lib/text/measure-canvas'
 import { useDoc } from '@/store/document'
 import { useUi } from '@/store/ui'
@@ -148,6 +148,20 @@ export function InlineTextEditor({ el, page, width, height, zoom }: Props) {
           if (e.key === 'Escape' || (e.key === 'Enter' && (e.metaKey || e.ctrlKey || proxy))) {
             e.preventDefault()
             ref.current?.blur()
+            return
+          }
+          // Paragraphs: the textarea doesn't wrap like the canvas, so up/down follow the canvas lines.
+          if (el.source?.para && (e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.altKey && !e.metaKey && !e.ctrlKey) {
+            const L = layoutLine(el, measureCanvas)
+            const from = ta.selectionDirection === 'backward' ? ta.selectionStart : ta.selectionEnd
+            const to = caretVertical(L, from, e.key === 'ArrowUp' ? -1 : 1)
+            if (to === null) return
+            e.preventDefault()
+            if (e.shiftKey) {
+              const anchor = ta.selectionDirection === 'backward' ? ta.selectionEnd : ta.selectionStart
+              ta.setSelectionRange(Math.min(anchor, to), Math.max(anchor, to), to < anchor ? 'backward' : 'forward')
+            } else ta.setSelectionRange(to, to)
+            syncSelection(ta)
           }
         }}
         className={

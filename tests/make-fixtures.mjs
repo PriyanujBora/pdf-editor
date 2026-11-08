@@ -569,4 +569,39 @@ function textOps(page, lines) {
   await writeFile(`${OUT}/redaction-blocked.pdf`, await blocked.save())
 }
 
+// --- Paragraph reflow (npm run test:paragraphs) ---------------------------------------------------
+// Two-column article, a justified legal clause, a bulleted list with hanging indents, a paragraph
+// mixing bold and regular, and a Bengali paragraph — printed by Chrome with bundled fonts embedded.
+{
+  const browser = await chromium.launch()
+  const page = await browser.newPage()
+  const face = async (fam, file, weight = 400) => `@font-face{font-family:${fam};font-weight:${weight};src:url(${await fontUrl(file)})}`
+  const css = [
+    await face('Arimo', 'Arimo-Regular.ttf'),
+    await face('Arimo', 'Arimo-Bold.ttf', 700),
+    await face('Tinos', 'Tinos-Regular.ttf'),
+    await face('Bengali', 'NotoSansBengali-Regular.ttf'),
+  ].join('')
+  const col = 'Rivers carry sediment from the mountains to the plains, where it settles and builds fertile soil. Farmers have relied on these floods for centuries, planting after the water recedes.'
+  const col2 = 'Modern dams change this rhythm. Less sediment reaches the delta, and the coastline slowly retreats while the reservoirs upstream fill with silt year after year.'
+  await page.setContent(`<!doctype html><meta charset=utf-8><style>${css}
+    body{margin:0;padding:48px 56px;font:11pt/1.45 Arimo;color:#111}
+    h2{font:700 13pt Arimo;margin:0 0 6px}
+    .cols{display:grid;grid-template-columns:1fr 1fr;gap:28px;margin-bottom:18px}
+    .cols p{margin:0 0 8px}
+    .legal{font:10.5pt/1.5 Tinos;text-align:justify;margin:0 0 18px}
+    ul{margin:0 0 18px;padding-left:22px} li{margin:0 0 4px}
+    .mixed{margin:0 0 18px} .bn{font:12pt/1.7 Bengali;margin:0}
+  </style>
+  <h2>Two columns</h2>
+  <div class=cols><div><p id=c1>${col}</p></div><div><p id=c2>${col2}</p></div></div>
+  <p class=legal id=legal>The Licensee shall not, without the prior written consent of the Licensor, assign, transfer, sublicense or otherwise dispose of any of its rights or obligations under this Agreement, and any purported assignment in breach of this clause shall be void and of no effect whatsoever.</p>
+  <ul><li>First item explains the setup in enough words that it wraps onto a second line, so the hanging indent of the bullet is visible here.</li><li>Second item is a little shorter but is still long enough that it wraps onto another line of text below it.</li></ul>
+  <p class=mixed id=mixed>This paragraph mixes <b>bold words</b> with regular ones, so an edit must keep the <b>emphasis</b> where it was while the rest of the sentence reflows normally.</p>
+  <p class=bn id=bn>নদী পাহাড় থেকে পলি বয়ে নিয়ে আসে এবং সমভূমিতে উর্বর মাটি তৈরি করে। কৃষকেরা বহু শতাব্দী ধরে এই বন্যার উপর নির্ভর করে চাষাবাদ করে আসছেন।</p>`)
+  await page.evaluate(() => document.fonts.ready)
+  await writeFile(`${OUT}/paragraphs.pdf`, await page.pdf({ format: 'A4', printBackground: true }))
+  await browser.close()
+}
+
 console.log('fixtures written to', OUT)

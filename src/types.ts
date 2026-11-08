@@ -161,6 +161,8 @@ export interface SourceGlyph {
   fontChar: string
   /** Advance width in glyph units (× run.fontMatrix → em), spacing excluded. */
   w: number
+  /** Baseline offset from the line's (page space, + down): marks positioned vertically (GPOS). */
+  dy?: number
 }
 
 /** An existing line of text as printed: what an edit is compared against. */
@@ -188,6 +190,27 @@ export interface SourceLine {
   background: string
   /** Glyphs each font has drawn in this document (keyed by /BaseFont), for typing new text. */
   fonts: Record<string, OriginalFont>
+  /**
+   * Set when this "line" is a whole paragraph (Phase 5): the fields above are the lines merged
+   * (texts joined, glyphs and runs concatenated), `para` keeps the lines themselves.
+   */
+  para?: SourcePara
+}
+
+export type ParaAlign = 'left' | 'center' | 'right' | 'justify'
+
+/** A printed paragraph: its lines and column geometry, for reflowing edits. */
+export interface SourcePara {
+  lines: SourceLine[]
+  /** Where each line starts in the merged source: character, glyph and run offsets. */
+  starts: { char: number; glyph: number; run: number }[]
+  /** Column edges (page space) of the lines after the first, and the first line's start. */
+  left: number
+  right: number
+  firstLeft: number
+  /** Baseline-to-baseline distance. */
+  leading: number
+  align: ParaAlign
 }
 
 export interface TextElement extends BaseElement {
@@ -223,6 +246,8 @@ export interface TextElement extends BaseElement {
   source?: SourceLine
   /** Set once the user restyles the line: every word is then drawn with the fields above. */
   override?: boolean
+  /** Paragraph edits: text scale chosen by "Shrink to fit" (1 = as printed). */
+  paraScale?: number
 }
 
 export interface ImageElement extends BaseElement {

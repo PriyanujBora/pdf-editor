@@ -33,6 +33,7 @@ import { FONT_FAMILIES, fontFileUrl, fontRuns, OBLIQUE_SHEAR } from '@/lib/fonts
 import { encodeLine, usesOriginal, type OriginalFont } from '@/lib/original-font'
 import { alignOffset, baselineOffset, splitLines } from '@/lib/text-layout'
 import { coversFor, layoutLine, type LineLayout, type Measure } from '@/lib/text/line-layout'
+import { glyphBaseline } from '@/lib/text/para-layout'
 import type { Cover, FontFamilyId, ImageElement, RedactElement, TextElement } from '@/types'
 import { collectGarbage, privateResources, pruneDeletedPages, rebuildPageTree, removeAnnotations } from './doc-structure'
 import { annotationsUnder, redactPage, type Box, type ImageSwap } from '@/lib/content/redact'
@@ -127,7 +128,7 @@ async function buildPdf(req: ExportRequest, notes: RemovalNote[], out: { redacti
         lines.set(el.id, prep)
         for (const gi of prep.L.gone) {
           const g = el.source.glyphs[gi]
-          glyphTargets.push({ x: g.x, y: el.source.baseline - el.source.runs[g.run].rise, code: g.code })
+          glyphTargets.push({ x: g.x, y: glyphBaseline(el.source, gi) - el.source.runs[g.run].rise, code: g.code })
           owners.push({ el: el.id, gi })
         }
       } else if (el.scan) {
@@ -674,13 +675,13 @@ function paintSourceLine(
         ? originals.keyForType3(page, run.widthSig ?? [])
         : originals.keyFor(page, { baseFont: run.baseFont, composite: run.composite, glyphs: {}, spaceGap: 0 })
       if (!key) {
-        standIn(d.uni, run.family, run.bold, run.italic, run.size * run.familyScale, run.hScale, run.color, d.x, d.y)
+        standIn(d.uni, run.family, run.bold, run.italic, run.size * run.familyScale * (d.scale ?? 1), run.hScale, run.color, d.x, d.y)
         continue
       }
       fill(run.color)
       const code = d.code.toString(16).padStart(run.composite ? 4 : 2, '0')
       page.pushOperators(
-        setFontAndSize(key, run.size),
+        setFontAndSize(key, run.size * (d.scale ?? 1)),
         setTextMatrix(run.hScale, 0, 0, 1, d.x, -d.y),
         PDFOperator.of(PDFOperatorNames.ShowTextAdjusted, [ctx.obj([PDFHexString.of(code)]) as PDFArray]),
       )
