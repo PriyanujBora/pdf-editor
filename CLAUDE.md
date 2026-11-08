@@ -30,6 +30,7 @@ npm run test:e2e       # Playwright suite at 390/820/1440px against E2E_URL (def
 npm run test:prod      # smoke test of the built app under wrangler dev (CSP, export, offline)
 npm run test:fidelity  # export keeps forms/outlines/tags/attachments/labels/encryption (dev server + tests/.venv)
 npm run test:redaction # redact through the UI, then pdftotext/pypdf/PDFium/raw-object/pixel checks (same needs)
+npm run test:paragraphs # paragraph reflow: column, justify, hanging indent, bold kept, Bengali glyphs (same needs)
 npm run test:edit-stability [-- filter]  # every editable line of fixtures + tests/corpus: no-op, editing,
                        # same-length word, missing glyph, size (needs dev server + tests/.venv, see tests/tools)
 npm run corpus:word    # real Word "Save as PDF" output into tests/corpus (Windows + Word only)
@@ -66,6 +67,8 @@ src/
   lib/text/capture.ts       every glyph pdf.js draws (operator list): position, font, size, Tc/Tw/Tz/Ts, colour
   lib/text/lines.ts         captured glyphs → editable lines with styled runs (SourceLine)
   lib/text/line-layout.ts   layout of an edited line — shared by editor and export (WYSIWYG)
+  lib/text/paragraphs.ts    group detected lines (rows) into paragraphs: column, leading, alignment
+  lib/text/para-layout.ts   paragraph edits: merged source, in-line edit or reflow, overflow, shrink
   lib/text/fallback.ts      stand-in family per PDF font: names → metric clones, else width fit
   lib/scan/                 scan-matched edits: fit.ts (fit a scanned line), compose.ts (build the
                             patch), pixels.ts (raw scan pixels), raster.ts, source.ts (paper/ink model)
@@ -101,6 +104,10 @@ public/fonts/               bundled TTFs — Inter, Roboto, Tinos (Times-metric,
   `cover` elements (old autosaves, scan fallback) still render the old way.
 - `ImageElement { x, y, width, height, rotation, assetId }`. Image bytes live in `session.assets`, not in
   undo history.
+- Paragraph edits: `TextElement.source` is the paragraph's lines merged (`mergeLines`; texts joined,
+  glyphs/runs concatenated) with `source.para` = the lines + column/leading/alignment. `layoutLine`
+  dispatches to `layoutParagraph`. A plain click edits the paragraph, Alt-click (or "Edit this line
+  only") one line. `paraScale` = Shrink to fit.
 - `RedactElement { x, y, width, height, text? }` (rotation always 0): a redaction mark, undoable like any
   element ("Mark all" is one step via `addElements`). `text` = what Find & redact / a tapped word marked;
   it is searched for again after applying. Clean-up options live in `session.sanitize` (autosave v3).
@@ -236,6 +243,19 @@ public/fonts/               bundled TTFs — Inter, Roboto, Tinos (Times-metric,
   vertical writing, non-Identity CMaps, fonts without widths, nested forms, glyph not found.
   PDFium truncates fractional widths, so glyphs after a removed word may move ≤ n/1000 em there
   (agreed tolerance; exact in pdf.js/Acrobat/Preview). The editor still shows patches while editing.
+- **Paragraph reflow** (Phase 5, `para-layout.ts`) — verified by `test:paragraphs`, don't regress:
+  - A change inside one line that still fits (and frees no room for the next line's first word) is laid
+    out exactly like a line edit; the other lines stay printed. Otherwise reflow from the first changed
+    line (greedy, breaks only at spaces so Indic clusters stay whole) until a break lands where the
+    printed one did — from there the printed lines stay.
+  - Unchanged text is matched in whole words; an unchanged word moves rigidly: all its printed glyphs at
+    their printed offsets (kerning, reordered/positioned marks). Glyphs the capture couldn't map to text
+    (uni '' or a non-space code mapped to a blank) join the word they sit in, else the next word to the
+    right (pre-base forms), and they are ink: removed and redrawn. `SourceGlyph.dy` keeps vertical mark
+    offsets (also the removal target's y). Width and gaps use the same right edge (`wordRight`).
+  - Inferred spaces between unchanged words keep their printed gap when narrower than a space.
+  - Same-baseline pieces of one row (capture splits) are merged into one paragraph line (`mergeRow`).
+  - Overflow past the printed lines is outlined on the page and offered Shrink to fit in the panel.
 - **Redaction** (`RedactElement`, Phase 4) — never weaken these:
   - Glyphs: removed when a mark covers their centre or ≥ 25 % of their box (advance × 0.8 em up, 0.25 em
     down — `lib/redact/geometry.ts`, the same test the verify step uses). Invisible OCR text included.

@@ -414,6 +414,16 @@ comments, and form data by choice.
 - **Fixtures**: two-column article, justified legal clause, bulleted list, mixed bold/regular paragraph, Bengali paragraph.
 - **Risks**: paragraph detection on real files (hanging indents, lists); line-break parity between canvas and export (same font files, same breaker).
 
+**As built** (`npm run test:paragraphs`):
+
+- Paragraph edits reuse the line pipeline: one merged source, the same draws, removal and export.
+- Edits that stay within a line keep Phase 1 line-edit quality.
+- Reflow keeps unchanged words rigid, which fixed Chrome's reordered Bengali clusters.
+- Not done:
+  - hard line breaks (Enter ends editing);
+  - hyphenation;
+  - re-detecting a paragraph that spans a column or page break.
+
 ### Phase 6 — The everyday jobs (in order)
 
 1. **Fill forms.** Field geometry and values from pdf.js; writes via pdf-lib's form API with appearance streams in the field's own DA font (embed a font for non-Latin values). Values live in autosave; optional flatten; Tab order. Calculation scripts are kept but not executed; the UI says "recalculated in Acrobat".

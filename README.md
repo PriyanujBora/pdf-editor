@@ -45,6 +45,9 @@ npx wrangler deploy
 - Edited existing text is really removed from the downloaded file: the old words are taken out of the
   page's content stream, so copying, searching and text extraction no longer find them. Only when that's
   impossible (rare fonts, text used as a clip) is the old text covered instead, and the app says so.
+- Clicking existing text edits its whole paragraph: the text reflows within the paragraph's column,
+  alignment (including justified) and line spacing, unchanged words keep the PDF's own letters, and
+  text that no longer fits is outlined with a "Shrink to fit" option. Alt-click edits a single line.
 - Redaction removes what is under each mark from the file — text (including invisible OCR text), image
   pixels, drawings, comments, form fields — then draws a black box. Find & redact searches words, regular
   expressions and common patterns (emails, phone numbers, PAN, Aadhaar, card numbers). Optional clean-up
