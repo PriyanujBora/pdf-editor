@@ -29,6 +29,8 @@ npm run fixtures                  # generate test PDFs into tests/fixtures
 npm run dev -- --port 5199        # in another terminal
 npm run test:e2e                  # phone 390px, tablet 820px, desktop 1440px; screenshots in tests/out
 npm run test:prod                 # against `npm run cf:dev`
+npm run fixtures:perf             # big PDFs for the performance budgets (gitignored)
+npm run test:perf                 # first page, scrolling, memory, export progress vs tests/perf-baseline.json
 ```
 
 ## Deploy (later)

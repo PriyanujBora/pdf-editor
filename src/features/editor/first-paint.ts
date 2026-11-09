@@ -2,5 +2,13 @@
 export const firstPaint = (() => {
   let resolve: () => void = () => {}
   const promise = new Promise<void>((r) => (resolve = r))
-  return { promise, done: () => resolve() }
+  const state = {
+    promise,
+    painted: false,
+    done: () => {
+      state.painted = true
+      resolve()
+    },
+  }
+  return state
 })()

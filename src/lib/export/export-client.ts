@@ -43,11 +43,11 @@ export async function exportPdf(
   const d0 = useDoc.getState()
   // Extract / split: the same export with a subset of the pages.
   const d = opts.pages ? { ...d0, pages: opts.pages } : d0
-  if (!s.bytes) throw new Error('No document open')
+  const source = await s.sourceBytes()
   const keepEncryption = s.encrypted && opts.keepEncryption !== false
   if (!opts.pages && !opts.compress && isUnchanged() && (keepEncryption || !s.encrypted) && !opts.forceRebuild && !(import.meta.env.DEV && (window as { __forceRebuild?: boolean }).__forceRebuild)) {
     onProgress?.(1)
-    return { bytes: s.bytes.slice(), notes: [] }
+    return { bytes: s.bytes ? source.slice() : source, notes: [] }
   }
 
   const pageIds = new Set(d.pages.map((p) => p.id))
@@ -83,7 +83,7 @@ export async function exportPdf(
     formValues: d.formValues,
     flattenForm: s.form.flatten && s.form.fields > 0,
     compress: opts.compress ?? null,
-    bytes: s.bytes,
+    bytes: source,
     password: s.password,
     keepEncryption,
     pages: d.pages,

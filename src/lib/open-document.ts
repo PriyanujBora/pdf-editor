@@ -40,6 +40,7 @@ export async function openDocument(bytes: Uint8Array, fileName: string, opts: Op
   const session = useSession.getState()
   const prev = session.pdf
   session.set({ status: 'loading', progress: 0, docs: {} })
+  const large = !!opts.file && bytes.length > LARGE_FILE
   // The editor's code loads while pdf.js parses the file (Phase 8: first page sooner).
   void import('@/features/editor/Editor')
 
@@ -47,7 +48,9 @@ export async function openDocument(bytes: Uint8Array, fileName: string, opts: Op
     const pdfjs = await loadPdfJs()
     // pdf.js transfers the buffer to its worker, so hand it a copy.
     const task = pdfjs.getDocument({
-      data: bytes.slice(),
+      // Large files go to pdf.js without a copy (it takes over the buffer); the app keeps the picked
+      // file instead and reads it again when exporting. Small ones are simply copied.
+      data: large ? bytes : bytes.slice(),
       password: opts.password,
       ...PDFJS_ASSET_OPTIONS,
       fontExtraProperties: true,
@@ -99,7 +102,8 @@ export async function openDocument(bytes: Uint8Array, fileName: string, opts: Op
       bookmarks: {},
       progress: 1,
       fileName,
-      bytes,
+      bytes: large ? null : bytes,
+      blob: large ? opts.file! : null,
       password: opts.password ?? '',
       pdf,
       sourcePages,
@@ -143,13 +147,16 @@ export async function openDocument(bytes: Uint8Array, fileName: string, opts: Op
     useUi.getState().set({ selectedId: null, editingId: null, tool: 'select', currentPageId: pages[0]?.id ?? null })
 
     // The autosave copy is written once the first pages have had their turn.
-    if (!restored) setTimeout(() => void saveSource(fileName, opts.file ?? bytes).catch(() => {}), 1500)
+    if (!restored) void saveSource(fileName, opts.file ?? bytes, 1500).catch(() => {})
   } catch (err) {
     useSession.getState().set({ status: prev ? 'ready' : 'empty', progress: 0 })
     if (err instanceof OpenFailure) throw err
     throw new OpenFailure(classifyError(err))
   }
 }
+
+/** Above this, the opened file isn't kept in memory (see openDocument). */
+const LARGE_FILE = 32 * 2 ** 20
 
 /** Resolves when every page's size is known (exports wait for it). */
 export let pageInfoReady: Promise<void> = Promise.resolve()
@@ -203,6 +210,7 @@ export async function resumeSaved(password?: string) {
   if (!saved) throw new OpenFailure({ kind: 'invalid', message: 'The saved session could not be found.' })
   return openDocument(saved.bytes, saved.fileName, {
     password,
+    file: saved.blob,
     restore: {
       pages: saved.meta?.pages ?? null,
       elements: saved.meta?.elements ?? {},

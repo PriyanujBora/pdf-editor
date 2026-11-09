@@ -41,6 +41,10 @@ npm run test:everyday  # signatures, annotations, pages (insert/blank/duplicate/
 npm run test:edit-stability [-- filter]  # every editable line of fixtures + tests/corpus: no-op, editing,
                        # same-length word, missing glyph, size (needs dev server + tests/.venv, see tests/tools)
 npm run corpus:word    # real Word "Save as PDF" output into tests/corpus (Windows + Word only)
+npm run fixtures:perf  # big gitignored PDFs: 500 / 2,000 text pages, 50 MB and 150 MB scans
+npm run test:perf      # first page, scroll fps + long tasks, peak memory, export progress vs
+                       # tests/perf-baseline.json (20 % regression fails). Run against the built app:
+                       # PERF_URL=http://localhost:8787/ (wrangler dev); --update rewrites the baseline
 ```
 
 `tests/corpus/` (private real-world PDFs) and `tests/.venv` (pypdf/PDFium tools) are gitignored.
@@ -248,6 +252,18 @@ public/fonts/               bundled TTFs — Inter, Roboto, Tinos (Times-metric,
     rebuilt from the page + `ScanMatch` + current text, so undo/autosave stay consistent.
   - Gate: correlation < 0.8, busy paper or faint ink → plain patch (`editVectorBlock`) with a toast.
   - Export: patch PNG + invisible text (render mode 3) + a Keywords note that scanned text was altered.
+- **Performance (Phase 8, `npm run test:perf`)** — keep these:
+  - Files > 32 MB: pdf.js takes the buffer (no copy), `session.bytes` is null and `session.blob` holds the
+    picked file. Read the source with `useSession.getState().sourceBytes()`, never `s.bytes` directly.
+  - Only the first 16 page sizes are read before the editor shows; the rest arrive in the background.
+    Await `pageInfoReady` before anything that needs every page (export does).
+  - Autosave: `saveSource` (delayed 1.5 s after opening) resets the session; every other persist write
+    queues behind it (`sourceWrite`), or edits get wiped or paired with the previous file.
+  - Scrolling: nothing that renders per page or per thumbnail may subscribe to `currentPageId` at the list
+    level (each thumb selects "am I current"); dnd-kit `items` must be a stable array; PageOverlay
+    mounts after 150 ms on screen; thumbnails use `content-visibility: auto`.
+  - `page.cleanup()` after each render; `cleanupWhenIdle` frees pdf.js caches; thumbnails render one at
+    a time after `firstPaint`.
 - **pdf-lib in-place export traps:** `removePage()` deletes the page object (rebuild the page tree
   instead); `normalize()` assigns *inherited* Resources by reference (copy before adding fonts);
   `save()` writes unreachable objects (garbage-collect, or deleted pages and replaced streams stay in the

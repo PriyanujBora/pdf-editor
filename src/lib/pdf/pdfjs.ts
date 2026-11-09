@@ -41,7 +41,7 @@ export function cleanupWhenIdle(pdf: PdfJs.PDFDocumentProxy, idleMs = 2500) {
         renders = 0
         void pdf.cleanup(true).catch(() => {})
       },
-      renders >= 6 ? 0 : idleMs,
+      renders >= 3 ? 0 : idleMs,
     )
   }
   const track = <T>(p: Promise<T>): Promise<T> => {

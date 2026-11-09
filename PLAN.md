@@ -465,6 +465,44 @@ Fixtures: a 500-page text PDF, a 150 MB image scan and a 2,000-page PDF. `npm ru
 
 A regression over 20 % fails. Android numbers are recorded manually.
 
+**As built** (`npm run fixtures:perf`, then `npm run test:perf` against the production build under
+`wrangler dev`; `PERF_URL` picks the server, `--update` rewrites `tests/perf-baseline.json`):
+
+| File | First page | Scroll fps | Long tasks > 100 ms (max) | Peak MB (browser idle) | Export (progress steps) |
+|---|---|---|---|---|---|
+| 50 MB scan | 0.89 s | 56 | 0 | 1,130 (350) | – |
+| 150 MB scan | 0.95 s | 48 | 0 | 1,174 (350) → **+824 MB** | – |
+| 500-page text | 0.93 s | 58 | 0 | 1,051 (365) | 1.2 s (64) |
+| 2,000-page text | 0.89 s | 34 | 7 (362 ms) | 1,519 (360) | – |
+
+Desktop Chromium, Windows 11. Timing and memory are measured in separate runs, because the memory
+sampler slows the page down. Peak memory is reported for the whole browser, so the budget is checked
+against its rise over idle.
+
+What changed:
+
+- **Opening**
+  - One shared pdf.js worker.
+  - The landing page prefetches the editor and pdf.js when idle.
+  - The first 16 page sizes are read before showing the page, the rest in the background (exports wait for `pageInfoReady`).
+  - Bookmarks and form info load later.
+  - The autosave copy is written 1.5 s after opening; every other autosave write queues behind it.
+- **Memory**
+  - Files over 32 MB aren't held as bytes. pdf.js takes the buffer, and the app keeps the picked file (a Blob), re-reading it to export.
+  - `page.cleanup()` after each render, and `pdf.cleanup()` once the viewer is idle.
+  - Thumbnails render one at a time, after the first page.
+- **Scrolling**
+  - Pooled IntersectionObservers.
+  - Pages flying past don't start a render, and their Konva overlay mounts only after 150 ms on screen.
+  - The current page is found by binary search.
+  - Each thumbnail subscribes to "am I current" itself, so the list doesn't re-render on scroll.
+  - Thumbnails use `content-visibility: auto`.
+  - The thumbnail list grows in idle chunks.
+- **Export**: progress is streamed per page and while saving (pdf-lib's writer yields between objects).
+
+Imperfect: 2,000-page files still scroll at about 34 fps, with a few layout-bound long tasks (every page
+is a DOM box). Android numbers are to be recorded by hand.
+
 ---
 
 ## 6. Spike: removing text from the content stream (Phase 3)

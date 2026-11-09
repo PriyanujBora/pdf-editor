@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import {
   closestCenter,
   DndContext,
@@ -90,22 +90,23 @@ const ThumbImage = memo(function ThumbImage({ page }: { page: PageItem }) {
   )
 })
 
-function SortableThumb({
+/** Memoised, and each thumb watches "am I current" itself: scrolling re-renders two thumbnails, not the list. */
+const SortableThumb = memo(function SortableThumb({
   page,
   index,
-  active,
   canDelete,
 }: {
   page: PageItem
   index: number
-  active: boolean
   canDelete: boolean
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: page.id })
+  const active = useUi((s) => s.currentPageId === page.id)
   return (
     <li
       ref={setNodeRef}
-      style={{ transform: CSS.Transform.toString(transform), transition }}
+      // Offscreen thumbnails skip layout (2,000-page files); "auto" remembers each one's real height.
+      style={{ transform: CSS.Transform.toString(transform), transition, contentVisibility: 'auto', containIntrinsicSize: 'auto 156px auto 258px' }}
       className={cn(
         'group relative flex flex-col items-center gap-1.5 rounded-xl p-2 select-none',
         isDragging && 'z-10 opacity-80',
@@ -185,7 +186,7 @@ function SortableThumb({
       </div>
     </li>
   )
-}
+})
 
 export function Thumbnails({ className }: { className?: string }) {
   const pages = useDoc((s) => s.pages)
@@ -202,7 +203,8 @@ export function Thumbnails({ className }: { className?: string }) {
       alive = false
     }
   }, [limit, pages.length])
-  const current = useUi((s) => s.currentPageId)
+  // A stable list: a new array would change dnd-kit's context and re-render every thumbnail on scroll.
+  const ids = useMemo(() => pages.map((p) => p.id), [pages])
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 220, tolerance: 8 } }),
@@ -238,10 +240,10 @@ export function Thumbnails({ className }: { className?: string }) {
         ))}
       </div>
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
-        <SortableContext items={pages.map((p) => p.id)} strategy={verticalListSortingStrategy}>
+        <SortableContext items={ids} strategy={verticalListSortingStrategy}>
           <ol className="flex flex-col items-center gap-1 p-2" aria-label="Pages">
             {pages.slice(0, limit).map((p, i) => (
-              <SortableThumb key={p.id} page={p} index={i} active={p.id === current} canDelete={pages.length > 1} />
+              <SortableThumb key={p.id} page={p} index={i} canDelete={pages.length > 1} />
             ))}
           </ol>
         </SortableContext>

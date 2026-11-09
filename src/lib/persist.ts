@@ -26,31 +26,56 @@ export interface SavedMeta {
   version: 1 | 2 | 3 | 4
 }
 
-export async function saveSource(fileName: string, bytes: Uint8Array | Blob) {
-  // A new file: the previous session's inserted PDFs go.
-  const old = (await keys(store)).filter((k) => String(k).startsWith('doc:'))
-  await Promise.all(old.map((k) => del(k, store)))
-  await setMany(
-    [
-      ['pdf', bytes],
-      ['assets', {}],
-      ['meta', null],
-      ['fileName', fileName],
-    ],
-    store,
+/**
+ * The source copy of a newly opened file is written a little later (the first pages render first), and
+ * it resets the session's state. Every other write waits for it, so an early autosave isn't wiped and
+ * the saved edits never get paired with the previous file.
+ */
+let sourceWrite: Promise<unknown> = Promise.resolve()
+
+/** Writes the opened file as the autosave source after `delayMs`; later writes queue behind it. */
+export function saveSource(fileName: string, bytes: Uint8Array | Blob, delayMs = 0) {
+  const run = sourceWrite.then(
+    () =>
+      new Promise<void>((resolve, reject) =>
+        setTimeout(async () => {
+          try {
+            // A new file: the previous session's inserted PDFs go.
+            const old = (await keys(store)).filter((k) => String(k).startsWith('doc:'))
+            await Promise.all(old.map((k) => del(k, store)))
+            await setMany(
+              [
+                ['pdf', bytes],
+                ['assets', {}],
+                ['meta', null],
+                ['fileName', fileName],
+              ],
+              store,
+            )
+            resolve()
+          } catch (e) {
+            reject(e)
+          }
+        }, delayMs),
+      ),
   )
+  sourceWrite = run.catch(() => {})
+  return run
 }
 
 export async function saveState(meta: Omit<SavedMeta, 'savedAt' | 'version'>) {
+  await sourceWrite
   await set('meta', { ...meta, savedAt: Date.now(), version: 4 } satisfies SavedMeta, store)
 }
 
 export async function saveAssets(assets: Record<string, ImageAsset>) {
+  await sourceWrite
   await set('assets', assets, store)
 }
 
 /** An inserted PDF's bytes (kept until the session is discarded). */
 export async function saveInsertedDoc(id: string, name: string, bytes: Uint8Array) {
+  await sourceWrite
   await set('doc:' + id, { name, bytes }, store)
 }
 
@@ -68,7 +93,7 @@ export async function loadSaved() {
   if (!bytes || !fileName) return null
   // Saved as the picked file (a Blob) since Phase 8; older saves hold the bytes.
   const data = bytes instanceof Blob ? new Uint8Array(await bytes.arrayBuffer()) : bytes
-  return { bytes: data, fileName, meta: meta ?? null, assets: assets ?? {} }
+  return { bytes: data, blob: bytes instanceof Blob ? bytes : undefined, fileName, meta: meta ?? null, assets: assets ?? {} }
 }
 
 export async function peekSavedName(): Promise<string | null> {
@@ -80,6 +105,7 @@ export async function peekSavedName(): Promise<string | null> {
 }
 
 export async function clearSaved() {
+  await sourceWrite
   const docs = (await keys(store)).filter((k) => String(k).startsWith('doc:'))
   await Promise.all([...['pdf', 'fileName', 'meta', 'assets'], ...docs].map((k) => del(k, store)))
 }

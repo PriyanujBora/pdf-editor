@@ -67,7 +67,8 @@ export function PageCanvas({ pageId, page: item, rotation, zoom, width, height, 
           if ((err as Error)?.name !== 'RenderingCancelledException') console.warn('Render failed', err)
         }
       },
-      first ? 0 : 160,
+      // Pages flying past during a fast scroll don't start a render; the very first one starts at once.
+      first ? (firstPaint.painted ? 120 : 0) : 160,
     )
     return () => {
       cancelled = true

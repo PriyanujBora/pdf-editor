@@ -1,0 +1,41 @@
+{
+  "note": "Desktop Chromium (Playwright). Android: record manually — first page / scroll / export by hand on a mid-range phone.",
+  "machine": "win32 x64",
+  "results": {
+    "perf-scan-50.pdf": {
+      "firstPage": 887,
+      "fps": 56,
+      "longTasks": 0,
+      "maxLongTask": 0,
+      "peakMB": 1159,
+      "idleMB": 349
+    },
+    "perf-scan-150.pdf": {
+      "firstPage": 894,
+      "fps": 49,
+      "longTasks": 0,
+      "maxLongTask": 0,
+      "peakMB": 1175,
+      "idleMB": 350
+    },
+    "perf-500.pdf": {
+      "firstPage": 1163,
+      "fps": 56,
+      "longTasks": 0,
+      "maxLongTask": 0,
+      "exportMs": 1178,
+      "progressSteps": 64,
+      "firstProgressMs": 524,
+      "peakMB": 1050,
+      "idleMB": 366
+    },
+    "perf-2000.pdf": {
+      "firstPage": 889,
+      "fps": 34,
+      "longTasks": 7,
+      "maxLongTask": 362,
+      "peakMB": 1519,
+      "idleMB": 360
+    }
+  }
+}

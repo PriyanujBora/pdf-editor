@@ -22,7 +22,7 @@ export function CompressDialog() {
   // Keyed by preset: switching presets shows no stale estimate.
   const [result, setResult] = useState<{ preset: string; value: { size: number; images: number } | 'none' } | null>(null)
   const [busy, setBusy] = useState(false)
-  const original = useSession((s) => s.bytes?.length ?? 0)
+  const original = useSession((s) => s.bytes?.length ?? s.blob?.size ?? 0)
   const p = PRESETS.find((x) => x.id === preset)!
   const estimate = result?.preset === preset ? result.value : null
 

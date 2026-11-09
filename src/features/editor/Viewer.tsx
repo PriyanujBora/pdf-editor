@@ -141,13 +141,17 @@ export function Viewer() {
       raf = 0
       const box = el.getBoundingClientRect()
       const mid = box.top + box.height * 0.4
-      for (const p of el.querySelectorAll<HTMLElement>('[data-page-id]')) {
-        const r = p.getBoundingClientRect()
-        if (r.bottom + PAGE_GAP / 2 >= mid) {
-          if (useUi.getState().currentPageId !== p.dataset.pageId) useUi.getState().set({ currentPageId: p.dataset.pageId })
-          return
-        }
+      // Pages are stacked top to bottom: binary search instead of measuring every page (2,000-page files).
+      const pages = el.querySelectorAll<HTMLElement>('[data-page-id]')
+      let lo = 0
+      let hi = pages.length - 1
+      while (lo < hi) {
+        const m = (lo + hi) >> 1
+        if (pages[m].getBoundingClientRect().bottom + PAGE_GAP / 2 >= mid) hi = m
+        else lo = m + 1
       }
+      const id = pages[lo]?.dataset.pageId
+      if (id && useUi.getState().currentPageId !== id) useUi.getState().set({ currentPageId: id })
     }
     const onScroll = () => (raf ||= requestAnimationFrame(update))
     el.addEventListener('scroll', onScroll, { passive: true })

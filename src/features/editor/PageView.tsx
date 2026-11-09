@@ -1,4 +1,4 @@
-import { memo, useRef } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import { useInView } from '@/hooks/use-in-view'
 import { useDoc } from '@/store/document'
 import { useSession } from '@/store/session'
@@ -23,7 +23,14 @@ export const PageView = memo(function PageView({ page, index, zoom }: Props) {
   useSession((s) => s.docs)
   useSession((s) => s.sourcePages)
   const info = sourceOf(page).info
-  const visible = useInView(ref, '[data-testid="viewer"]', '150% 150%')
+  const visible = useInView(ref, '[data-testid="viewer"]', '100% 100%')
+  // The editing overlay (Konva: two page-sized canvases) only for pages that stay on screen a moment,
+  // not for every page a fast scroll flies past.
+  const [settled, setSettled] = useState(false)
+  useEffect(() => {
+    const t = setTimeout(() => setSettled(visible), visible ? 150 : 0)
+    return () => clearTimeout(t)
+  }, [visible])
   const editingId = useUi((s) => s.editingId)
   const hasForm = useSession((s) => s.form.fields > 0)
   const editingEl = useDoc((s) => {
@@ -56,7 +63,7 @@ export const PageView = memo(function PageView({ page, index, zoom }: Props) {
             height={dispH}
             forms={hasForm}
           />
-          <PageOverlay page={page} width={info.width} height={info.height} zoom={zoom} />
+          {settled && <PageOverlay page={page} width={info.width} height={info.height} zoom={zoom} />}
           {hasForm && <FormLayer page={page} info={info} zoom={zoom} />}
           {editingEl && (
             <InlineTextEditor key={editingEl.id} el={editingEl} page={page} width={info.width} height={info.height} zoom={zoom} />
